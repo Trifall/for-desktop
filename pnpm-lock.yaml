@@ -23,6 +23,9 @@ importers:
       discord-rpc:
         specifier: ^4.0.1
         version: 4.0.1(bufferutil@4.1.0)(encoding@0.1.13)(utf-8-validate@6.0.6)
+      electron-serve:
+        specifier: ^3.0.1
+        version: 3.0.1
       electron-squirrel-startup:
         specifier: ^1.0.1
         version: 1.0.1
@@ -1488,6 +1491,10 @@ packages:
     engines: {node: '>=12.13.0'}
     deprecated: Please use @electron/rebuild moving forward.  There is no API change, just a package name change
     hasBin: true
+
+  electron-serve@3.0.1:
+    resolution: {integrity: sha512-o40R/CfuxT4ccpD3kK2enFghd2jgXSgI02l4p51f8f2clXC4GPKpi0JQUn1FSRGrIHWH8fjdPlRsznEyItDPLg==}
+    engines: {node: '>=20'}
 
   electron-squirrel-startup@1.0.1:
     resolution: {integrity: sha512-sTfFIHGku+7PsHLJ7v0dRcZNkALrV+YEozINTW8X1nM//e5O3L+rfYuvSW00lmGHnYmUjARZulD8F2V8ISI9RA==}
@@ -5206,6 +5213,8 @@ snapshots:
     transitivePeerDependencies:
       - bluebird
       - supports-color
+
+  electron-serve@3.0.1: {}
 
   electron-squirrel-startup@1.0.1:
     dependencies:

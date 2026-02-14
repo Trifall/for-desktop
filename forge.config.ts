@@ -128,10 +128,10 @@ const config: ForgeConfig = {
     name: STRINGS.name,
     executableName: STRINGS.execName,
     icon: `${ASSET_DIR}/icon`,
-    // extraResource: [
-    //   // include all the asset files
-    //   ...globSync(ASSET_DIR + "/**/*"),
-    // ],
+    extraResource: [
+      // Include web-dist for bundled web client
+      "web-dist",
+    ],
   },
   rebuildConfig: {},
   makers,

@@ -90,11 +90,39 @@ if (acquiredLock) {
 
   // ensure URLs launch in external context
   app.on("web-contents-created", (_, contents) => {
-    // prevent navigation out of build URL origin
+    // Allow navigation to Stoat/Revolt API and CDN domains
+    const allowedOrigins = [
+      "https://stoat.chat",
+      "https://beta.revolt.chat",
+      "https://revolt.chat",
+      "https://api.revolt.chat",
+      "https://cdn.stoatusercontent.com",
+      "https://autumn.stoatusercontent.com",
+      "https://cdn.revolt.chat",
+    ];
+
+    // prevent navigation out of build URL origin (but allow API/CDN)
     contents.on("will-navigate", (event, navigationUrl) => {
-      if (new URL(navigationUrl).origin !== BUILD_URL.origin) {
-        event.preventDefault();
+      const url = new URL(navigationUrl);
+
+      // Allow stoat:// protocol (local electron-serve)
+      if (url.protocol === "stoat:") {
+        return;
       }
+
+      // Allow same origin (for local dev)
+      if (url.origin === BUILD_URL.origin) {
+        return;
+      }
+
+      // Allow known API/CDN origins
+      if (allowedOrigins.some(origin => url.origin === origin || url.href.startsWith(origin))) {
+        return;
+      }
+
+      // Block everything else
+      console.log("[Window] Blocking navigation to:", navigationUrl);
+      event.preventDefault();
     });
 
     // handle links externally

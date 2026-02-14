@@ -7,12 +7,14 @@ import {
   app,
   ipcMain,
   nativeImage,
+  net,
+  protocol,
 } from "electron";
 
 import windowIconAsset from "../../assets/desktop/icon.png?asset";
 
 import { config } from "./config";
-import { updateTrayMenu } from "./tray";
+  import { updateTrayMenu } from "./tray";
 
 // global reference to main window
 export let mainWindow: BrowserWindow;
@@ -20,12 +22,95 @@ export let mainWindow: BrowserWindow;
 // currently in-use build
 export let BUILD_URL: URL;
 
+// Local web assets directory
+let localWebDir: string | null = null;
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "stoat",
+    privileges: {
+      standard: true,
+      secure: true,
+      allowServiceWorkers: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+    },
+  },
+]);
+
 export function initBuildUrl() {
   const forceServer = app.commandLine.getSwitchValue("force-server");
-  BUILD_URL = new URL(
-    forceServer ||
-      /*MAIN_WINDOW_VITE_DEV_SERVER_URL ??*/ "https://beta.revolt.chat",
-  );
+
+  // Try to find local web assets in multiple locations
+  const fs = require("fs");
+  const path = require("path");
+
+  // Possible locations for web-dist
+  const possiblePaths = [
+    // In resources directory (packaged app)
+    path.join(process.resourcesPath, "web-dist"),
+    // Relative to app path (development)
+    path.join(app.getAppPath(), "..", "web-dist"),
+    // Next to the executable
+    path.join(path.dirname(process.execPath), "web-dist"),
+  ];
+
+  for (const testPath of possiblePaths) {
+    const indexPath = path.join(testPath, "index.html");
+    if (fs.existsSync(indexPath)) {
+      localWebDir = testPath;
+      console.log("[Window] Found local web assets at:", testPath);
+      break;
+    }
+  }
+
+  if (!forceServer && localWebDir) {
+    // Setup protocol handler for local files
+    setupLocalProtocol();
+    BUILD_URL = new URL("stoat://-/index.html");
+    console.log("[Window] Loading from local web assets via custom protocol:", localWebDir);
+  } else {
+    BUILD_URL = new URL(
+      forceServer ||
+        /*MAIN_WINDOW_VITE_DEV_SERVER_URL ??*/ "https://beta.revolt.chat",
+    );
+    console.log("[Window] Loading from remote URL:", BUILD_URL.toString());
+    if (forceServer) {
+      console.log("[Window] (forced server via --force-server flag)");
+    } else if (!localWebDir) {
+      console.log("[Window] (local web assets not found)");
+    }
+  }
+}
+
+function setupLocalProtocol() {
+  // Handle stoat:// protocol
+  protocol.handle("stoat", (request) => {
+    const url = new URL(request.url);
+    let pathname = url.pathname;
+    
+    // Default to index.html for root
+    if (!pathname || pathname === "/" || pathname === "-/") {
+      pathname = "/index.html";
+    }
+    
+    // Remove leading dash if present (stoat://-/path -> /path)
+    if (pathname.startsWith("/-/")) {
+      pathname = pathname.slice(2);
+    }
+    
+    // Construct full file path
+    const filePath = join(localWebDir!, pathname);
+    
+    // Security check: ensure path is within localWebDir
+    if (!filePath.startsWith(localWebDir!)) {
+      console.error("[Protocol] Blocked access outside web-dist:", pathname);
+      return new Response("Forbidden", { status: 403 });
+    }
+    
+    // Serve the file
+    return net.fetch("file://" + filePath);
+  });
 }
 
 // internal window state
@@ -55,6 +140,9 @@ export function createMainWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       spellcheck: true,
+      // Disable webSecurity when loading from localhost (dev server) to avoid CSP/CORS issues
+      // Keep it enabled for production (remote URLs)
+      webSecurity: BUILD_URL.protocol === "https:",
     },
   });
 
