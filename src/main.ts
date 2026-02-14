@@ -6,8 +6,14 @@ import started from "electron-squirrel-startup";
 import { autoLaunch } from "./native/autoLaunch";
 import { config } from "./native/config";
 import { initDiscordRpc } from "./native/discordRpc";
+import { cleanupPushToTalk, initPushToTalk } from "./native/pushToTalk";
 import { initTray } from "./native/tray";
-import { BUILD_URL, createMainWindow, mainWindow } from "./native/window";
+import {
+  BUILD_URL,
+  createMainWindow,
+  initBuildUrl,
+  mainWindow,
+} from "./native/window";
 
 // Squirrel-specific logic
 // create/remove shortcuts on Windows when installing / uninstalling
@@ -30,6 +36,9 @@ if (acquiredLock) {
 
   // create and configure the app when electron is ready
   app.on("ready", () => {
+    // initialise build URL from command line
+    initBuildUrl();
+
     // enable auto start on Windows and MacOS
     if (config.firstLaunch) {
       if (process.platform === "win32" || process.platform === "darwin") {
@@ -41,6 +50,7 @@ if (acquiredLock) {
     createMainWindow();
     initTray();
     initDiscordRpc();
+    initPushToTalk();
 
     // Windows specific fix for notifications
     if (process.platform === "win32") {
@@ -59,9 +69,15 @@ if (acquiredLock) {
   // (irrespective of the minimise-to-tray option)
 
   app.on("window-all-closed", () => {
+    cleanupPushToTalk();
     if (process.platform !== "darwin") {
       app.quit();
     }
+  });
+
+  // Clean up PTT on quit
+  app.on("before-quit", () => {
+    cleanupPushToTalk();
   });
 
   app.on("activate", () => {

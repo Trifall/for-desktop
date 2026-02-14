@@ -18,11 +18,15 @@ import { updateTrayMenu } from "./tray";
 export let mainWindow: BrowserWindow;
 
 // currently in-use build
-export const BUILD_URL = new URL(
-  app.commandLine.hasSwitch("force-server")
-    ? app.commandLine.getSwitchValue("force-server")
-    : /*MAIN_WINDOW_VITE_DEV_SERVER_URL ??*/ "https://beta.revolt.chat",
-);
+export let BUILD_URL: URL;
+
+export function initBuildUrl() {
+  const forceServer = app.commandLine.getSwitchValue("force-server");
+  BUILD_URL = new URL(
+    forceServer ||
+      /*MAIN_WINDOW_VITE_DEV_SERVER_URL ??*/ "https://beta.revolt.chat",
+  );
+}
 
 // internal window state
 let shouldQuit = false;
@@ -63,13 +67,19 @@ export function createMainWindow() {
   }
 
   // restore last position if it was moved previously
-  if(config.windowState.x > 0 || config.windowState.y > 0) {
-    mainWindow.setPosition(config.windowState.x ?? 0, config.windowState.y ?? 0);
+  if (config.windowState.x > 0 || config.windowState.y > 0) {
+    mainWindow.setPosition(
+      config.windowState.x ?? 0,
+      config.windowState.y ?? 0,
+    );
   }
 
   // restore last size if it was resized previously
-  if(config.windowState.width > 0 && config.windowState.height > 0) {
-    mainWindow.setSize(config.windowState.width ?? 1280, config.windowState.height ?? 720);
+  if (config.windowState.width > 0 && config.windowState.height > 0) {
+    mainWindow.setSize(
+      config.windowState.width ?? 1280,
+      config.windowState.height ?? 720,
+    );
   }
 
   // load the entrypoint
@@ -103,20 +113,30 @@ export function createMainWindow() {
   mainWindow.on("moved", generateState);
   mainWindow.on("resized", generateState);
 
-  // rebind zoom controls to be more sensible
+  // Handle keyboard shortcuts (zoom + DevTools)
   mainWindow.webContents.on("before-input-event", (event, input) => {
+    // Zoom in with Ctrl+=
     if (input.control && input.key === "=") {
-      // zoom in (+)
       event.preventDefault();
       mainWindow.webContents.setZoomLevel(
         mainWindow.webContents.getZoomLevel() + 1,
       );
-    } else if (input.control && input.key === "-") {
-      // zoom out (-)
+      return;
+    }
+
+    // Zoom out with Ctrl+-
+    if (input.control && input.key === "-") {
       event.preventDefault();
       mainWindow.webContents.setZoomLevel(
         mainWindow.webContents.getZoomLevel() - 1,
       );
+      return;
+    }
+
+    // Toggle DevTools with F12
+    if (input.key === "F12" && !input.control && !input.shift && !input.alt) {
+      event.preventDefault();
+      mainWindow.webContents.toggleDevTools();
     }
   });
 
@@ -172,8 +192,6 @@ export function createMainWindow() {
     mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize(),
   );
   ipcMain.on("close", () => mainWindow.close());
-
-  // mainWindow.webContents.openDevTools();
 
   // let i = 0;
   // setInterval(() => setBadgeCount((++i % 30) + 1), 1000);

@@ -6,6 +6,7 @@
   "repository": "stoatchat/desktop",
   "scripts": {
     "start": "electron-forge start",
+    "start:x11": "electron-forge start -- --ozone-platform=x11",
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",
@@ -37,6 +38,7 @@
     "@typescript-eslint/eslint-plugin": "^5.62.0",
     "@typescript-eslint/parser": "^5.62.0",
     "electron": "38.1.2",
+    "electron-rebuild": "^3.2.9",
     "eslint": "^8.57.1",
     "eslint-plugin-import": "^2.32.0",
     "json-schema-typed": "^8.0.1",
@@ -52,6 +54,7 @@
     "discord-rpc": "^4.0.1",
     "electron-squirrel-startup": "^1.0.1",
     "electron-store": "^10.1.0",
+    "node-global-key-listener": "^0.3.0",
     "update-electron-app": "^3.1.1",
     "utf-8-validate": "^6.0.5"
   },
