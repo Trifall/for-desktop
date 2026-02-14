@@ -137,47 +137,33 @@ function matchesKeybind(input: Electron.Input): boolean {
 /**
  * Handle before-input-event from webContents
  * This fires for ALL keyboard input, even when window appears unfocused on XWayland
+ *
+ * IMPORTANT: We do NOT call preventDefault(), so the key still gets typed in inputs.
+ * This allows PTT to work AND the key to be typed (like Discord).
  */
 function handleBeforeInputEvent(event: Electron.Event, input: Electron.Input) {
-  // Log ALL key events for debugging
-  if (input.key.length === 1 || input.key === "v" || input.key === "V") {
-    pttLog(
-      "before-input-event: key='" +
-        input.key +
-        "' type=" +
-        input.type +
-        " ctrl=" +
-        input.control +
-        " shift=" +
-        input.shift,
-    );
-  }
-
   if (!matchesKeybind(input)) {
     return;
   }
 
-  if (!matchesKeybind(input)) {
-    return;
-  }
-
-  // We matched the keybind!
-  pttLog("Keybind matched! Type:", input.type);
+  // We matched the PTT keybind!
+  // Note: NOT calling preventDefault() so the key gets typed in chat
+  const focused = mainWindow?.isFocused() ?? false;
 
   if (config.pushToTalkMode === "hold") {
     if (input.type === "keyDown") {
-      // Prevent the key from being typed into the app
-      event.preventDefault();
-      activatePtt("before-input-event keyDown");
+      activatePtt(
+        "before-input-event keyDown" +
+          (focused ? " (focused)" : " (unfocused)"),
+      );
     } else if (input.type === "keyUp") {
-      // Key released
-      event.preventDefault();
-      deactivatePtt("before-input-event keyUp");
+      deactivatePtt(
+        "before-input-event keyUp" + (focused ? " (focused)" : " (unfocused)"),
+      );
     }
   } else {
     // Toggle mode - only respond to keyDown
     if (input.type === "keyDown") {
-      event.preventDefault();
       isPttActive = !isPttActive;
       sendPttState(isPttActive);
       pttLog("PTT toggled:", isPttActive ? "ON" : "OFF");
@@ -202,11 +188,14 @@ function registerGlobalHotkey(accelerator: string): boolean {
       const timeSinceLastTrigger = now - lastGlobalTriggerTime;
       lastGlobalTriggerTime = now;
 
-      pttLog(
-        "Global hotkey triggered (fallback), delta:",
-        timeSinceLastTrigger,
-        "ms",
-      );
+      // Only log on first trigger, not re-triggers (too verbose)
+      if (!isPttActive) {
+        pttLog(
+          "Global hotkey triggered (fallback), delta:",
+          timeSinceLastTrigger,
+          "ms",
+        );
+      }
 
       if (config.pushToTalkMode === "hold") {
         // Hold mode with globalShortcut uses timeout-based approach
@@ -215,10 +204,6 @@ function registerGlobalHotkey(accelerator: string): boolean {
           // First activation - start hold mode
           lastActivationTime = now;
           activatePtt("global hotkey");
-          pttLog("PTT activated, starting hold mode");
-        } else {
-          // Re-trigger while active - reset timeout
-          pttLog("Re-triggered, resetting timeout");
         }
 
         // Clear existing timeout
@@ -306,6 +291,16 @@ export async function registerPushToTalkHotkey(): Promise<void> {
 
   pttLog("Parsed keybind:", currentKeybind, "modifiers:", keybindModifiers);
 
+  // Send PTT config to renderer for DOM interception
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("push-to-talk-config", {
+      enabled: config.pushToTalk,
+      keybind: config.pushToTalkKeybind,
+      mode: config.pushToTalkMode,
+    });
+    pttLog("Sent PTT config to renderer");
+  }
+
   // Set up before-input-event listener (PRIMARY method)
   // This works on XWayland even when window appears unfocused
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -322,35 +317,48 @@ export async function registerPushToTalkHotkey(): Promise<void> {
       "| Visible:",
       mainWindow.isVisible(),
     );
-
-    // Debug: Log window focus state periodically
-    setInterval(() => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        pttLog(
-          "[DEBUG] Window state - Focused:",
-          mainWindow.isFocused(),
-          "| Visible:",
-          mainWindow.isVisible(),
-          "| PTT Active:",
-          isPttActive,
-        );
-      }
-    }, 5000);
   } else {
     pttLog("✗ Cannot attach before-input-event listener - window not ready");
   }
 
-  // Also register global hotkey as fallback
-  const globalSuccess = registerGlobalHotkey(accelerator);
+  // Set up focus/blur handlers to toggle globalShortcut
+  // When focused: unregister globalShortcut (allow typing)
+  // When blurred: register globalShortcut (capture keys globally)
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    // Handle focus
+    mainWindow.on("focus", () => {
+      pttLog("Window focused - unregistering global hotkey to allow typing");
+      if (registeredAccelerator) {
+        globalShortcut.unregister(registeredAccelerator);
+        registeredAccelerator = null;
+      }
+    });
 
-  if (globalSuccess) {
-    pttLog("✓ Global hotkey registered as backup");
+    // Handle blur
+    mainWindow.on("blur", () => {
+      pttLog("Window blurred - registering global hotkey for unfocused PTT");
+      if (config.pushToTalk) {
+        registerGlobalHotkey(accelerator);
+      }
+    });
+
+    // Initially register if not focused
+    if (!mainWindow.isFocused()) {
+      const globalSuccess = registerGlobalHotkey(accelerator);
+      if (globalSuccess) {
+        pttLog("✓ Global hotkey registered (window not focused)");
+      }
+    } else {
+      pttLog(
+        "Window is focused - global hotkey not registered (allowing typing)",
+      );
+    }
   }
 
   // Send initial state (mic off)
   isPttActive = false;
   sendPttState(false);
-  pttLog("✓ PTT initialized (using before-input-event)");
+  pttLog("✓ PTT initialized");
 }
 
 /**

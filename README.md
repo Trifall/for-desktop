@@ -13,6 +13,103 @@ Application for Windows, macOS, and Linux.
 </div>
 <br/>
 
+## Push-to-Talk Feature
+
+Stoat Desktop now includes a full push-to-talk (PTT) implementation with support for both "hold" and "toggle" modes, designed to work reliably on Linux with XWayland.
+
+### Features
+
+- **Hold Mode**: Press and hold to talk, release to mute (configurable release delay)
+- **Toggle Mode**: Press once to toggle mic on/off
+- **Customizable Keybind**: Use any key or key combination (e.g., "V", "Shift+V", "F8")
+- **Release Delay**: Configurable delay before muting after releasing the key (prevents audio cut-off)
+- **Works When Focused**: Can type your PTT key in chat while still using it for PTT
+- **Works When Unfocused**: Global hotkey detection via XWayland for use with other apps
+
+### Configuration
+
+PTT settings are stored in the config file:
+
+**Linux:** `~/.config/stoat-desktop/config.json`
+
+**macOS:** `~/Library/Application Support/stoat-desktop/config.json`
+
+**Windows:** `%APPDATA%/stoat-desktop/config.json`
+
+Example configuration:
+
+```json
+{
+  "pushToTalk": true,
+  "pushToTalkKeybind": "V",
+  "pushToTalkMode": "hold",
+  "pushToTalkReleaseDelay": 250
+}
+```
+
+Settings can also be changed via DevTools console:
+
+```javascript
+window.desktopConfig.set({ pushToTalk: true });
+window.desktopConfig.set({ pushToTalkKeybind: "V" });
+window.desktopConfig.set({ pushToTalkMode: "hold" });
+window.desktopConfig.set({ pushToTalkReleaseDelay: 250 });
+```
+
+### Technical Implementation
+
+The PTT system uses a hybrid approach to handle both focused and unfocused window states:
+
+**When Window is Focused:**
+
+- Uses Electron's `before-input-event` API on the webContents
+- Detects keys without calling `preventDefault()`, allowing the key to be typed in chat inputs
+- No `globalShortcut` registration (prevents key capture issues)
+
+**When Window is Unfocused:**
+
+- Uses `before-input-event` for XWayland compatibility (XWayland forwards input events even when window appears unfocused)
+- Uses `globalShortcut` as a backup for true global hotkey detection
+- Both handlers work simultaneously for maximum reliability
+
+**Keybind Detection:**
+
+- Parses accelerator strings (e.g., "Shift+V") into key and modifier components
+- Matches against incoming input events
+- Supports modifiers: Control, Shift, Alt, Meta
+
+**Hold Mode with Timeout:**
+
+- On key press: Activates PTT immediately
+- While holding: Autorepeat events reset a timeout (prevents premature deactivation)
+- On release: Starts configurable release delay timer
+- After delay: Deactivates PTT
+- If key pressed again during delay: Cancels delay and continues PTT
+
+**State Management:**
+
+- Desktop app tracks PTT state in main process
+- State changes sent to renderer via IPC (`push-to-talk` channel)
+- Web client (Solid.js) receives state and controls LiveKit microphone
+- Release delay handled entirely in main process for consistency
+
+**XWayland Compatibility:**
+
+- Linux with XWayland (`--ozone-platform=x11`) forwards input events to X11 apps even when not visually focused
+- This allows PTT to work even when clicking on other windows
+- `before-input-event` captures these forwarded events
+- `globalShortcut` provides OS-level hotkey support for true global detection
+
+### Running with PTT Support
+
+For full PTT functionality on Linux, use XWayland:
+
+```bash
+npx electron-forge start -- --ozone-platform=x11 --force-server=http://localhost:5173
+```
+
+See [SETUP_GUIDE.md](./SETUP_GUIDE.md) for detailed setup instructions.
+
 ## Development Guide
 
 _Contribution guidelines for Desktop app TBA!_
@@ -74,3 +171,26 @@ git -c submodule."assets".update=checkout submodule update --init assets
 ```
 
 Currently, this is required to build, any forks are expected to provide their own assets.
+
+## Architecture
+
+The desktop app is built with:
+
+- **Electron**: Cross-platform desktop framework
+- **Vite**: Build tool and dev server
+- **TypeScript**: Type-safe JavaScript
+- **electron-store**: Persistent configuration storage
+- **electron-forge**: Packaging and distribution
+
+Key directories:
+
+- `src/native/`: Main process code (Node.js/Electron APIs)
+- `src/world/`: Preload scripts (bridge between main and renderer)
+- `src/native/pushToTalk.ts`: PTT implementation
+- `src/native/config.ts`: Configuration management
+
+The PTT implementation involves:
+
+1. **Main Process** (`pushToTalk.ts`): Handles key detection, state management, IPC communication
+2. **Preload Script** (`world/pushToTalk.ts`): Exposes API to renderer
+3. **Web Client** (`client/packages/client/components/rtc/state.tsx`): Receives PTT events, controls LiveKit mic
