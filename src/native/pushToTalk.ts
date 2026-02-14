@@ -18,8 +18,10 @@ let keybindModifiers = { ctrl: false, shift: false, alt: false, meta: false };
 
 // For globalShortcut fallback
 let holdModeTimeout: NodeJS.Timeout | null = null;
-const GLOBAL_HOLD_TIMEOUT_MS = 250;
+const GLOBAL_HOLD_TIMEOUT_MS = 400; // Longer timeout to avoid initial blip
 let lastGlobalTriggerTime = 0;
+let lastActivationTime = 0;
+const MIN_HOLD_DURATION_MS = 600; // Don't allow deactivation for first 600ms
 
 // Log initial module load
 pttLog("Module loaded (using before-input-event)");
@@ -104,21 +106,22 @@ function matchesKeybind(input: Electron.Input): boolean {
  * This fires for ALL keyboard input, even when window appears unfocused on XWayland
  */
 function handleBeforeInputEvent(event: Electron.Event, input: Electron.Input) {
-  // Log all key events for debugging (remove this in production)
-  if (input.key.toLowerCase() === currentKeybind.toLowerCase()) {
+  // Log ALL key events for debugging
+  if (input.key.length === 1 || input.key === "v" || input.key === "V") {
     pttLog(
-      "before-input-event:",
-      input.key,
-      "type:",
-      input.type,
-      "modifiers:",
-      {
-        ctrl: input.control,
-        shift: input.shift,
-        alt: input.alt,
-        meta: input.meta,
-      },
+      "before-input-event: key='" +
+        input.key +
+        "' type=" +
+        input.type +
+        " ctrl=" +
+        input.control +
+        " shift=" +
+        input.shift,
     );
+  }
+
+  if (!matchesKeybind(input)) {
+    return;
   }
 
   if (!matchesKeybind(input)) {
@@ -166,20 +169,52 @@ function registerGlobalHotkey(accelerator: string): boolean {
       const timeSinceLastTrigger = now - lastGlobalTriggerTime;
       lastGlobalTriggerTime = now;
 
-      pttLog("Global hotkey triggered (fallback)");
+      pttLog(
+        "Global hotkey triggered (fallback), delta:",
+        timeSinceLastTrigger,
+        "ms",
+      );
 
       if (config.pushToTalkMode === "hold") {
         // Hold mode with globalShortcut uses timeout-based approach
-        activatePtt("global hotkey");
+
+        if (!isPttActive) {
+          // First activation - start hold mode
+          lastActivationTime = now;
+          activatePtt("global hotkey");
+          pttLog("PTT activated, starting hold mode");
+        } else {
+          // Re-trigger while active - reset timeout
+          pttLog("Re-triggered, resetting timeout");
+        }
 
         // Clear existing timeout
         if (holdModeTimeout) {
           clearTimeout(holdModeTimeout);
         }
 
-        // Set new timeout - deactivate if no re-trigger within timeout
+        // Set new timeout - but only deactivate if we've held long enough
         holdModeTimeout = setTimeout(() => {
-          deactivatePtt("global timeout");
+          const holdDuration = Date.now() - lastActivationTime;
+          if (holdDuration >= MIN_HOLD_DURATION_MS) {
+            deactivatePtt("global timeout");
+          } else {
+            // Not held long enough yet, extend timeout
+            pttLog(
+              "Extending timeout (held for",
+              holdDuration,
+              "ms, need",
+              MIN_HOLD_DURATION_MS,
+              "ms)",
+            );
+            if (holdModeTimeout) clearTimeout(holdModeTimeout);
+            holdModeTimeout = setTimeout(
+              () => {
+                deactivatePtt("global timeout extended");
+              },
+              MIN_HOLD_DURATION_MS - holdDuration + 100,
+            );
+          }
         }, GLOBAL_HOLD_TIMEOUT_MS);
       } else {
         // Toggle mode
@@ -242,7 +277,34 @@ export async function registerPushToTalkHotkey(): Promise<void> {
   // This works on XWayland even when window appears unfocused
   if (mainWindow && !mainWindow.isDestroyed()) {
     pttLog("Setting up before-input-event listener...");
+
+    // Remove any existing listener first to avoid duplicates
+    mainWindow.webContents.off("before-input-event", handleBeforeInputEvent);
+
+    // Add the listener
     mainWindow.webContents.on("before-input-event", handleBeforeInputEvent);
+    pttLog(
+      "✓ before-input-event listener attached. Window focused:",
+      mainWindow.isFocused(),
+      "| Visible:",
+      mainWindow.isVisible(),
+    );
+
+    // Debug: Log window focus state periodically
+    setInterval(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        pttLog(
+          "[DEBUG] Window state - Focused:",
+          mainWindow.isFocused(),
+          "| Visible:",
+          mainWindow.isVisible(),
+          "| PTT Active:",
+          isPttActive,
+        );
+      }
+    }, 5000);
+  } else {
+    pttLog("✗ Cannot attach before-input-event listener - window not ready");
   }
 
   // Also register global hotkey as fallback

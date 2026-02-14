@@ -22,10 +22,13 @@ export let BUILD_URL: URL;
 
 export function initBuildUrl() {
   const forceServer = app.commandLine.getSwitchValue("force-server");
+  console.log("[DEBUG] force-server value:", forceServer);
+  console.log("[DEBUG] All args:", process.argv);
   BUILD_URL = new URL(
     forceServer ||
       /*MAIN_WINDOW_VITE_DEV_SERVER_URL ??*/ "https://beta.revolt.chat",
   );
+  console.log("[DEBUG] BUILD_URL set to:", BUILD_URL.toString());
 }
 
 // internal window state
