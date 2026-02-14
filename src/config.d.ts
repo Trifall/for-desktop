@@ -39,11 +39,8 @@ declare interface Window {
   pushToTalk: {
     onStateChange: (callback: (state: { active: boolean }) => void) => void;
     offStateChange: (callback: (state: { active: boolean }) => void) => void;
-    onLocalKeybind: (callback: (data: { accelerator: string }) => void) => void;
-    offLocalKeybind: (
-      callback: (data: { accelerator: string }) => void,
-    ) => void;
     setManualState: (active: boolean) => void;
     getCurrentState: () => { active: boolean };
+    isAvailable: () => boolean;
   };
 }
