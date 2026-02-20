@@ -271,114 +271,87 @@ async function startKeyspy(): Promise<void> {
   try {
     keyboardListenerInstance = new GlobalKeyboardListener();
     
+    // handle unexpected process exit
+    if (keyboardListenerInstance.proc) {
+      keyboardListenerInstance.proc.on("exit", (code: number) => {
+        if (isKeyspyRunning) {
+          pttLog(`Keyspy process exited unexpectedly with code ${code}`);
+          keyboardListenerInstance = null;
+          isKeyspyRunning = false;
+          keyspyListener = null;
+        }
+      });
+    }
+    
     keyspyListener = (event: any, isDown: Record<string, boolean>) => {
-      try {
-        const keyName = normalizeKeyName(event.name);
-        const isKeyUpForActivePtt = event.state === "UP" && normalizeKeyName(pttActivationKey) === keyName;
-        const isPttKey = isKeyUpForActivePtt
-          ? matchesKeyspyEvent(event, isDown, false)
-          : matchesKeyspyEvent(event, isDown);
-
-        pttLog(
-          `Keyspy event: name=${event.name}, state=${event.state}, ` +
-          `isPttKey=${isPttKey}, pttActive=${isPttActive}`
-        );
-
-        if (!isPttKey) {
-          return false;
-        }
-
-        if (config.pushToTalkMode === "hold") {
-          if (event.state === "DOWN") {
-            const keyIdentifier = event.name;
-            
-            if (heldKeys.has(keyIdentifier)) {
-              pttLog(`Ignoring auto-repeat for: ${keyIdentifier}`);
-              return false;
-            }
-
-            heldKeys.add(keyIdentifier);
-
-            if (!isPttActive || pttActivationKey === null) {
-              pttActivationKey = keyIdentifier;
-              activatePtt("keyspy global keydown");
-            }
-          } else if (event.state === "UP") {
-            const keyIdentifier = event.name;
-            heldKeys.delete(keyIdentifier);
-
-            if (pttActivationKey === keyIdentifier) {
-              pttActivationKey = null;
-              deactivatePtt("keyspy global keyup");
-            }
-          }
-        } else {
-          if (event.state === "DOWN") {
-            const keyIdentifier = event.name;
-            if (heldKeys.has(keyIdentifier)) {
-              return false;
-            }
-            heldKeys.add(keyIdentifier);
-
-            isPttActive = !isPttActive;
-            sendPttState(isPttActive);
-            pttLog("Keyspy PTT toggled:", isPttActive ? "ON" : "OFF");
-          } else if (event.state === "UP") {
-            heldKeys.delete(event.name);
-          }
-        }
-
-        return false;
-      } catch (err: any) {
-        if (err.code === "EPIPE") {
-          pttLog("✗ Keyspy pipe broken in listener, stopping...");
-          stopKeyspy();
-        } else {
-          pttLog("✗ Error in keyspy listener:", err);
-        }
+      // ignore keyspy events when window is focused - before-input-event handles those
+      if (isWindowFocused) {
         return false;
       }
+
+      const keyName = normalizeKeyName(event.name);
+      const isKeyUpForActivePtt = event.state === "UP" && normalizeKeyName(pttActivationKey) === keyName;
+      const isPttKey = isKeyUpForActivePtt
+        ? matchesKeyspyEvent(event, isDown, false)
+        : matchesKeyspyEvent(event, isDown);
+
+      pttLog(
+        `Keyspy event: name=${event.name}, state=${event.state}, ` +
+        `isPttKey=${isPttKey}, pttActive=${isPttActive}`
+      );
+
+      if (!isPttKey) {
+        return false;
+      }
+
+      if (config.pushToTalkMode === "hold") {
+        if (event.state === "DOWN") {
+          const keyIdentifier = event.name;
+          
+          if (heldKeys.has(keyIdentifier)) {
+            pttLog(`Ignoring auto-repeat for: ${keyIdentifier}`);
+            return false;
+          }
+
+          heldKeys.add(keyIdentifier);
+
+          if (!isPttActive || pttActivationKey === null) {
+            pttActivationKey = keyIdentifier;
+            activatePtt("keyspy global keydown");
+          }
+        } else if (event.state === "UP") {
+          const keyIdentifier = event.name;
+          heldKeys.delete(keyIdentifier);
+
+          if (pttActivationKey === keyIdentifier) {
+            pttActivationKey = null;
+            deactivatePtt("keyspy global keyup");
+          }
+        }
+      } else {
+        if (event.state === "DOWN") {
+          const keyIdentifier = event.name;
+          if (heldKeys.has(keyIdentifier)) {
+            return false;
+          }
+          heldKeys.add(keyIdentifier);
+
+          isPttActive = !isPttActive;
+          sendPttState(isPttActive);
+          pttLog("Keyspy PTT toggled:", isPttActive ? "ON" : "OFF");
+        } else if (event.state === "UP") {
+          heldKeys.delete(event.name);
+        }
+      }
+
+      return false;
     };
 
     await keyboardListenerInstance.addListener(keyspyListener);
     isKeyspyRunning = true;
     pttLog("✓ Keyspy started successfully");
-  } catch (err: any) {
-    if (err.code === "EPIPE") {
-      pttLog("✗ Keyspy pipe broken, cleaning up...");
-      keyboardListenerInstance = null;
-      isKeyspyRunning = false;
-    } else {
-      pttLog("✗ Failed to start keyspy:", err);
-    }
-  }
-}
-
-function stopKeyspy(): void {
-  if (!isKeyspyRunning || !keyboardListenerInstance) {
-    return;
-  }
-
-  pttLog("Stopping keyspy...");
-  try {
-    keyboardListenerInstance.kill();
-    keyboardListenerInstance = null;
-    isKeyspyRunning = false;
-    heldKeys.clear();
-    pttActivationKey = null;
-    keyspyListener = null;
-    pttLog("✓ Keyspy stopped");
-  } catch (err: any) {
-    if (err.code === "EPIPE") {
-      pttLog("✗ Keyspy pipe already broken, cleaning up state...");
-    } else {
-      pttLog("✗ Error stopping keyspy:", err);
-    }
-    keyboardListenerInstance = null;
-    isKeyspyRunning = false;
-    heldKeys.clear();
-    pttActivationKey = null;
-    keyspyListener = null;
+  } catch (err) {
+    pttLog("✗ Failed to start keyspy:", err);
   }
 }
 
@@ -426,21 +399,15 @@ export async function registerPushToTalkHotkey(): Promise<void> {
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     isWindowFocused = mainWindow.isFocused();
+    pttLog("Window initially focused:", isWindowFocused);
     
-    if (isWindowFocused) {
-      pttLog("Window initially focused - not starting keyspy to allow typing");
-    } else if (config.pushToTalk) {
-      pttLog("Window initially blurred - starting keyspy for global PTT");
-      await startKeyspy();
-    } else {
-      pttLog("Window initially blurred - PTT disabled, not starting keyspy");
-    }
+    await startKeyspy();
     
+    // track focus state for ignoring keyspy events when focused
     mainWindow.on("focus", () => {
       if (!isWindowFocused) {
-        pttLog("Window focused - stopping keyspy and clearing state");
+        pttLog("Window focused - keyspy events will be ignored");
         isWindowFocused = true;
-        stopKeyspy();
         heldKeys.clear();
         pttActivationKey = null;
       }
@@ -448,15 +415,10 @@ export async function registerPushToTalkHotkey(): Promise<void> {
 
     mainWindow.on("blur", () => {
       if (isWindowFocused) {
+        pttLog("Window blurred - keyspy events will now be processed");
         isWindowFocused = false;
-        if (config.pushToTalk) {
-          pttLog("Window blurred - starting keyspy for global PTT");
-          heldKeys.clear();
-          pttActivationKey = null;
-          startKeyspy();
-        } else {
-          pttLog("Window blurred - PTT disabled, not starting keyspy");
-        }
+        heldKeys.clear();
+        pttActivationKey = null;
       }
     });
   }
@@ -476,7 +438,18 @@ export function unregisterPushToTalkHotkey(): void {
     pttLog("Removed before-input-event listener");
   }
 
-  stopKeyspy();
+  // stop keyspy when PTT is disabled
+  if (isKeyspyRunning && keyboardListenerInstance) {
+    try {
+      keyboardListenerInstance.kill();
+      pttLog("Keyspy killed");
+    } catch (err) {
+      pttLog("Error killing keyspy:", err);
+    }
+    keyboardListenerInstance = null;
+    isKeyspyRunning = false;
+    keyspyListener = null;
+  }
 
   heldKeys.clear();
   pttActivationKey = null;
