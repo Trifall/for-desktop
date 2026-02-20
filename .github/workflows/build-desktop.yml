@@ -3,18 +3,18 @@ name: Build Desktop Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g., v1.0.0)'
+        description: "Version tag (e.g., v1.0.0)"
         required: true
-        default: 'v1.0.0'
+        default: "v1.0.0"
 
 jobs:
   build-linux:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout desktop repo
         uses: actions/checkout@v4
@@ -45,47 +45,47 @@ jobs:
             exit 1
           fi
           echo "client/ directory found"
-      
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'pnpm'
-          cache-dependency-path: '**/pnpm-lock.yaml'
-      
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: "**/pnpm-lock.yaml"
+
       - name: Setup Mise
         uses: jdx/mise-action@v2
         with:
           install: true
           cache: true
           working_directory: client
-      
+
       - name: Clean old builds
         run: |
           rm -rf client/packages/client/dist client/packages/client/dist-prod
           rm -rf client/packages/stoat.js/dist
           rm -rf client/packages/solid-livekit-components/dist
           rm -rf client/packages/js-lingui-solid/packages/*/dist
-      
+
       - name: Install dependencies (Client)
         working-directory: client
         run: pnpm install --frozen-lockfile
-      
+
       - name: Pull brand assets
         working-directory: client
         run: |
           # Pull Stoat brand assets (submodule with update=none)
           git -c submodule."packages/client/assets".update=checkout submodule update --init packages/client/assets
-      
+
       - name: Build dependencies
         working-directory: client
         run: |
           set -e
           mise build:deps
-      
+
       - name: Copy audio assets
         run: |
           if [ -d "client/packages/client/scripts/assets_fallback/audio" ]; then
@@ -96,43 +96,43 @@ jobs:
             node scripts/copyAssets.mjs
             cd ../../..
           fi
-      
+
       - name: Process translations
         working-directory: client
         run: |
           # Compile lingui messages after lingui packages are built
           mise lingui:extract
           mise lingui:compile
-      
+
       - name: Build web client
         working-directory: client
         run: mise build
-      
+
       - name: Copy web assets to desktop
         run: |
           rm -rf web-dist
           mkdir -p web-dist
           cp -r client/packages/client/dist/* web-dist/
-      
+
       - name: Install desktop dependencies
         run: pnpm install --frozen-lockfile
-      
+
       - name: Install keyspy build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libx11-dev libxi-dev
-      
+
       - name: Clear Vite cache
         run: rm -rf .vite
-      
+
       - name: Build desktop app
         run: pnpm package
-      
+
       - name: Create distributable ZIP
         run: |
           rm -rf out/Stoat-linux-*
           pnpm make --platform=linux --targets=@electron-forge/maker-zip
-      
+
       - name: Find ZIP file
         id: find-zip
         run: |
@@ -145,39 +145,17 @@ jobs:
             echo "ERROR: ZIP file not found"
             exit 1
           fi
-      
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: stoat-desktop-linux
           path: ${{ steps.find-zip.outputs.zip_path }}
           retention-days: 30
-      
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: ${{ steps.find-zip.outputs.zip_path }}
-          name: Stoat Desktop ${{ github.ref_name }}
-          body: |
-            Stoat Desktop for Linux
-            
-            ## Installation
-            1. Download the ZIP file
-            2. Extract it
-            3. Run `./stoat-desktop` from the extracted folder
-            
-            ## Requirements
-            - X11 or XWayland for full functionality
-            - libx11, libxtst, libxt, libxinerama packages
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
     runs-on: windows-latest
-    
+
     steps:
       - name: Checkout desktop repo
         uses: actions/checkout@v4
@@ -207,24 +185,24 @@ jobs:
             exit 1
           }
           Write-Host "client/ directory found"
-      
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'pnpm'
-          cache-dependency-path: '**/pnpm-lock.yaml'
-      
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: "**/pnpm-lock.yaml"
+
       - name: Setup Mise
         uses: jdx/mise-action@v2
         with:
           install: true
           cache: true
           working_directory: client
-      
+
       - name: Clean old builds
         shell: pwsh
         run: |
@@ -233,7 +211,7 @@ jobs:
           foreach ($dir in $dirs) {
             Remove-Item -Recurse -Force "$($dir.FullName)/dist" -ErrorAction SilentlyContinue
           }
-      
+
       - name: Install dependencies (Client)
         working-directory: client
         env:
@@ -274,31 +252,31 @@ jobs:
       - name: Build web client
         working-directory: client
         run: mise build
-      
+
       - name: Copy web assets to desktop
         shell: pwsh
         run: |
           Remove-Item -Recurse -Force web-dist -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path web-dist
           Copy-Item -Recurse -Force client/packages/client/dist/* web-dist/
-      
+
       - name: Install desktop dependencies
         run: pnpm install --frozen-lockfile
-      
+
       - name: Install MinGW (for keyspy)
         run: choco install mingw -y
-      
+
       - name: Clear Vite cache
         run: Remove-Item -Recurse -Force .vite -ErrorAction SilentlyContinue
-      
+
       - name: Build desktop app
         run: pnpm package
-      
+
       - name: Create distributable ZIP
         run: |
           Remove-Item -Recurse -Force out/Stoat-win32-* -ErrorAction SilentlyContinue
           pnpm make --platform=win32 --targets=@electron-forge/maker-zip
-      
+
       - name: Find ZIP file
         id: find-zip
         shell: pwsh
@@ -312,27 +290,48 @@ jobs:
             echo "ERROR: ZIP file not found"
             exit 1
           }
-      
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: stoat-desktop-windows
           path: ${{ steps.find-zip.outputs.zip_path }}
           retention-days: 30
-      
+
+  create-release:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: stoat-desktop-linux
+          path: artifacts
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: stoat-desktop-windows
+          path: artifacts
+
+      - name: List artifacts
+        run: ls -la artifacts
+
       - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v1
         with:
-          files: ${{ steps.find-zip.outputs.zip_path }}
+          files: artifacts/*.zip
           name: Stoat Desktop ${{ github.ref_name }}
           body: |
-            Stoat Desktop for Windows
-            
-            ## Installation
-            1. Download the ZIP file
-            2. Extract it
-            3. Run `Stoat.exe` from the extracted folder
+            ## Downloads
+            - **Windows**: Download the Windows ZIP, extract, and run `Stoat.exe`
+            - **Linux**: Download the Linux ZIP, extract, and run `./stoat-desktop`
+
+            ## Requirements (Linux)
+            - X11 or XWayland for full functionality
+            - libx11, libxtst, libxt, libxinerama packages
           draft: false
           prerelease: false
         env:
