@@ -257,6 +257,7 @@ Relevant files include:
 - Keep release CI pointed at `Trifall/stoat-for-web` unless the fork owner explicitly changes the paired client.
 - Build the paired client and copy its output into `web-dist/` before packaging desktop.
 - Set `VITE_CFG_ENABLE_VIDEO: "true"` in both Linux and Windows web-build jobs so camera and screen-share controls ship enabled.
+- Pass the selected desktop release tag to both paired web builds as `VITE_RELEASE_TAG` so the settings sidebar identifies the archive release instead of the upstream web package version.
 - Keep Linux and Windows client build steps behaviorally synchronized even though Windows currently expands mise tasks into direct pnpm commands.
 - Preserve the Windows direct-command workaround for mise's nested task PATH loss.
 - Keep GitHub Actions on Node 24-capable major versions or newer.

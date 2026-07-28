@@ -11,9 +11,10 @@ Since the desktop app (`stoat-for-desktop`) and web client (`client`) are in sep
 1. Checks out the `stoat-for-desktop` repo (current repo)
 2. Checks out the `stoat-for-web` repo (web client) into the `client/` subdirectory
 3. Builds the web client from the `client/` directory
-4. Copies the built assets to `web-dist/` in the desktop repo
-5. Builds the Electron app
-6. Creates distributable ZIP files
+4. Embeds the selected desktop release tag in the web client
+5. Copies the built assets to `web-dist/` in the desktop repo
+6. Builds the Electron app
+7. Creates distributable ZIP files
 
 ## Triggering Builds
 
@@ -161,6 +162,13 @@ Ensure `client/packages/client/scripts/assets_fallback/audio/` exists with all 7
 
 ### Camera and Screen Share Show "Coming soon!"
 Video support is compiled into the web bundle through `VITE_CFG_ENABLE_VIDEO`. Local builds may receive it from an ignored `packages/client/.env`, but CI checkouts do not include that file. Both workflow web-build steps must explicitly set `VITE_CFG_ENABLE_VIDEO: "true"`; otherwise the release bundle permanently renders camera and screen sharing as unavailable even though the Electron screen picker is implemented.
+
+### Settings Shows the Upstream Web Version
+
+The desktop release tag is compiled into the paired web client through `VITE_RELEASE_TAG`. Both platform build jobs must set it from `${{ github.event.inputs.version || github.ref_name }}`. Without that variable, the client intentionally falls back to the upstream root `package.json` version.
+
+### Client Features Are Missing After an Update
+Extract the complete release ZIP into a new empty directory and launch the executable from that directory. Do not replace only the executable or reuse a shortcut until its target is verified. Packaged web assets live under `resources/web-dist`; if that directory is missing, the desktop app falls back to the remote web client.
 
 ### Client Repo Not Found
 Make sure the `repository` field in the checkout step matches your actual GitHub username/repo name for the web client.

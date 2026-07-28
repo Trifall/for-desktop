@@ -108,6 +108,7 @@ jobs:
         working-directory: client
         env:
           VITE_CFG_ENABLE_VIDEO: "true"
+          VITE_RELEASE_TAG: ${{ github.event.inputs.version || github.ref_name }}
         run: mise build
 
       - name: Copy web assets to desktop
@@ -269,6 +270,7 @@ jobs:
         working-directory: client
         env:
           VITE_CFG_ENABLE_VIDEO: "true"
+          VITE_RELEASE_TAG: ${{ github.event.inputs.version || github.ref_name }}
         run: |
           pnpm --filter client exec node scripts/copyAssets.mjs
           pnpm --filter client exec vite build
@@ -362,8 +364,10 @@ jobs:
 
           cat > changelog.txt << 'EOF'
           ## Downloads
-          - **Windows**: Download the Windows ZIP, extract, and run `Stoat.exe`
-          - **Linux**: Download the Linux ZIP, extract, and run `./stoat-desktop`
+          - **Windows**: Extract the entire Windows ZIP into a new empty folder and run `stoat-desktop.exe`.
+          - **Linux**: Extract the entire Linux ZIP into a new empty folder and run `./stoat-desktop`.
+
+          Do not copy only the executable over an older install. The bundled client is stored in `resources/web-dist` and must remain beside the application files.
 
           ## Requirements (Linux)
           - X11 or XWayland for full functionality
