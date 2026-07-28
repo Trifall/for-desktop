@@ -214,7 +214,7 @@ Relevant files include:
 - Keep `keyspy`, `electron`, `bufferutil`, and `utf-8-validate` external in `vite.main.config.ts`.
 - Keep `keyspy` unpacked from asar.
 - Keep `nodeLinker: hoisted`; native copy paths and keyspy packaging rely on the flat layout.
-- Add native dependencies to `onlyBuiltDependencies` when their install scripts must run.
+- Add native dependencies to `allowBuilds` when their install scripts must run.
 - Preserve Forge `prePackage` compilation of `WinKeyServer.exe` and `X11KeyServer`.
 - Preserve Forge `postPackage` copies of `keyspy` and `@expo/sudo-prompt` into `app.asar.unpacked/node_modules`.
 - Keep Linux X11/XInput development packages and Windows MinGW available in packaging environments.

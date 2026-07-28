@@ -3,7 +3,6 @@ import { IUpdateInfo, updateElectronApp } from "update-electron-app";
 import { BrowserWindow, Notification, app, shell } from "electron";
 import started from "electron-squirrel-startup";
 
-import { autoLaunch } from "./native/autoLaunch";
 import { config } from "./native/config";
 import { initDiscordRpc } from "./native/discordRpc";
 import {
@@ -139,7 +138,11 @@ if (acquiredLock) {
       }
 
       // Allow known API/CDN origins
-      if (allowedOrigins.some(origin => url.origin === origin || url.href.startsWith(origin))) {
+      if (
+        allowedOrigins.some(
+          (origin) => url.origin === origin || url.href.startsWith(origin),
+        )
+      ) {
         return;
       }
 

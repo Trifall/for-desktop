@@ -108,7 +108,7 @@ Neither Electron's `globalShortcut` nor `iohook` worked reliably, so the fork ev
 | `forge.config.ts` | `packagerConfig.asar.unpack = "**/node_modules/keyspy/**/*"` (keyspy spawns a native child process and cannot live inside asar) and `prePackage`/`postPackage` hooks that compile keyspy's native server binaries at package time and copy `keyspy` + `@expo/sudo-prompt` into `app.asar.unpacked/node_modules/`. |
 | `vite.main.config.ts` | Marks `keyspy` (and `bufferutil`, `utf-8-validate`) as `external` — they must not be bundled by Vite. |
 | `package.json` | Declares `keyspy: ^1.1.1` as a runtime dependency and `electron-rebuild: ^3.2.9` as a dev dependency (used to rebuild native modules against Electron's headers). |
-| `pnpm-workspace.yaml` | `nodeLinker: hoisted` — keyspy expects a hoisted node_modules layout. Also lists `bufferutil` and `utf-8-validate` in `onlyBuiltDependencies` because they ship native code. |
+| `pnpm-workspace.yaml` | `nodeLinker: hoisted` — keyspy expects a hoisted node_modules layout. Its `allowBuilds` map includes native dependencies such as `keyspy`, `lzma-native`, `bufferutil`, and `utf-8-validate`. |
 | `.github/workflows/build-desktop.yml` | Installs `libx11-dev libxi-dev` on Linux and `mingw` on Windows so the `prePackage` hook can compile the keyspy servers. |
 | `assets` submodule | Provides the desktop tray icon. (Not PTT-specific but related — see §6.) |
 
@@ -340,14 +340,14 @@ The fork's `package.json` carries forward:
 - **`scripts`:**
   - `"start": "electron-forge start -- --no-sandbox"` — **`--no-sandbox` was added by upstream's Electron 40 PR** but is required for the app to run on Linux without root. Preserve it.
   - `"start:x11": "electron-forge start -- --no-sandbox --ozone-platform=x11"` — fork-only. The `--ozone-platform=x11` flag forces XWayland/X11 mode, which is required for PTT to work on Linux (Wayland-native mode doesn't let keyspy grab keys). Documented in `SETUP_GUIDE.md`.
-  - `"install:flatpak"`, `"run:flatpak"`, `"run:nix"` — fork-only helpers (the flatpak ones pair with `MakerFlatpak`).
+  - `"install:flatpak"`, `"run:flatpak"`, `"run:nix"` — preserve these platform test helpers; the Flatpak scripts use the upstream `chat.stoat.StoatDesktop` application ID.
 - **`dependencies`:**
   - `keyspy: ^1.1.1` — PTT (see §2).
   - `@homebridge/dbus-native`, `auto-launch`, `bufferutil`, `utf-8-validate` — some are fork-added dependencies for features below.
 - **`devDependencies`:**
   - `electron-rebuild: ^3.2.9` — fork-added; needed to rebuild native modules against new Electron versions when upstream bumps Electron. Upstream relies on `@electron-forge/plugin-auto-unpack-natives` instead.
   - `electron: ^40.8.3` — **set by upstream's PR #193**, must stay in sync with upstream.
-- **`packageManager`:** `pnpm@10.18.1+sha512:...` — pins pnpm version via Corepack. Critical because the lockfile is `pnpm-lock.yaml` v10.
+- **`packageManager`:** `pnpm@11.17.0+sha512:...` — pins pnpm via Corepack and matches `.mise/config.toml`. Regenerate and verify the lockfile with this version.
 
 ### 6.2 `forge.config.ts`
 
@@ -363,7 +363,7 @@ Fork additions on top of upstream:
 - **`postPackage(forgeConfig, options)`** — recursively copies:
   - `node_modules/keyspy` → `resources/app.asar.unpacked/node_modules/keyspy`
   - `node_modules/@expo/sudo-prompt` → `resources/app.asar.unpacked/node_modules/@expo/sudo-prompt` (needed by auto-launch on some platforms).
-- **Makers changed by upstream's Electron 40 PR (#193 + #195):** `MakerFlatpak` was updated with a new `runtimeVersion: "25.08"`, zypak `v2025.09`, refined `finishArgs` (X11/wayland sockets, pipewire, `ELECTRON_TRASH=gio`, etc.), and screenshot URL → URL in metainfo (`#195`). These are upstream changes — keep them when merging.
+- **Flatpak configuration:** `MakerFlatpak` uses application ID `chat.stoat.StoatDesktop`, runtime `25.08`, zypak `v2025.09`, and the current socket, PipeWire, filesystem, and environment permissions. Keep the maker configuration available for local builds, but do not add Flatpak publication to the fork's release workflow without a separate decision.
 - **`MakerSquirrel` iconUrl** still points at `https://stoat.chat/app/assets/icon-DUSNE-Pb.ico`.
 - **Publishers:** `PublisherGithub` → `{ owner: "stoatchat", name: "for-desktop" }`. Fork release artifacts go to the fork's own releases via `create-release` in the workflow; this publisher is used by `pnpm publish` (rarely run).
 
@@ -377,7 +377,8 @@ All four must stay external — Vite must not try to bundle them. `keyspy` requi
 ### 6.4 `pnpm-workspace.yaml`
 
 - **`nodeLinker: hoisted`** — required. `keyspy` and the unpacked-modules copy logic assume a flat `node_modules` layout. Switching to `isolated` will break PTT in packaged builds.
-- **`onlyBuiltDependencies`:** `bufferutil`, `electron`, `electron-winstaller`, `esbuild`, `register-scheme`, `utf-8-validate` — restricts which packages' install scripts run. Adding native deps without listing them here usually silently breaks them.
+- **`allowBuilds`:** explicitly permits install scripts for `bufferutil`, `electron`, `electron-winstaller`, `esbuild`, `keyspy`, `lzma-native`, `register-scheme`, and `utf-8-validate`. Adding a native dependency without approving its build usually breaks frozen installs or packaged behavior.
+- **`blockExoticSubdeps: false`:** required for the Git dependency used by `discord-rpc`.
 - **`patchedDependencies`:** `cross-zip@4.0.1: patches/cross-zip@4.0.1.patch` (see §7).
 
 ### 6.5 `assets` submodule
@@ -388,13 +389,15 @@ git -c submodule."assets".update=checkout submodule update --init assets
 ```
 The `update = checkout` setting in `.gitmodules` matters when the submodule branch diverges — preserve it.
 
+The `mise assets` task initializes the pinned submodule without first deinitializing it. Do not restore an automatic `assets:fallback` dependency or another forced deinit step; routine asset setup must not discard local submodule work.
+
 ---
 
 ## 7. Cross-zip Patch — `KEEP ON MERGE`
 
 `patches/cross-zip@4.0.1.patch` replaces two deprecated `fs.rmdir(..., { recursive: true })` / `fs.rmdirSync(..., { recursive: true })` calls in `cross-zip`'s `index.js` with `fs.rm(..., { recursive, force })` / `fs.rmSync(...)`. Under the newer Node version bundled with Electron 40, the deprecated `rmdir` recursive form throws.
 
-This patch is applied automatically by pnpm via the `patchedDependencies` entry in `pnpm-workspace.yaml`. If pnpm stops recognizing the patch (e.g. upgrade to pnpm 11), update the patches mechanism. Don't delete the patch file unless upstream bumps `cross-zip` past 4.0.1 and the deprecation is gone upstream.
+This patch is applied automatically by pnpm via the `patchedDependencies` entry in `pnpm-workspace.yaml`. Don't delete the patch file unless upstream bumps `cross-zip` past 4.0.1 and the deprecation is gone upstream.
 
 ---
 
@@ -539,13 +542,14 @@ Review every skipped commit. Git may skip a local patch when upstream independen
 2. **Start a real merge (not a cherry-pick):** `git merge upstream/main --no-ff --no-commit` — preserves upstream history and avoids the "x commits behind" indicator.
 3. **Classify conflicts before resolving them:** compare both sides and §2–§9 of this document. Resolve routine, behavior-preserving conflicts directly. For every material behavioral or architectural conflict, follow §10 and obtain a separate user decision for that area before editing it.
 4. **Expected routine conflicts and their usual resolutions:** these instructions apply only while the underlying behavior still matches this document. If upstream has substantially redesigned one of these areas, treat it as a material conflict under §10 instead of applying this recipe blindly.
-   - `.github/workflows/release-webhook.yml` and `.github/workflows/validate-pr-title.yml` (modify/delete) → `git rm` them (keep our deletion). The fork does not use release-please or the PR title validator.
+   - Upstream `.github/workflows/build.yml`, `release-please.yml`, `release-webhook.yml`, `git-town.yml`, and `validate-pr-title.yml` (modify/delete) → keep the fork's deletion. The fork uses `build-desktop.yml` instead.
    - `package.json`:
      - Keep the fork's `scripts.start:x11`, `install:flatpak`, `run:flatpak`, `run:nix`.
      - Keep `--no-sandbox` on `start` (added by upstream PR #193 — keep it).
-     - Keep `electron-rebuild` in devDeps.
-     - Keep `keyspy` in dependencies.
-     - Adopt upstream's `electron: ^<latest>` version.
+      - Keep `electron-rebuild` in devDeps.
+      - Keep `keyspy` in dependencies.
+      - Adopt upstream's `electron: ^<latest>` version.
+      - Adopt upstream's pinned pnpm version and matching `.mise/config.toml` tool versions.
    - `pnpm-lock.yaml` → `git checkout --theirs pnpm-lock.yaml`, then `pnpm install --no-frozen-lockfile` to regenerate.
    - `src/native/window.ts`:
      - Keep `net` and `protocol` imports (fork).
@@ -556,8 +560,10 @@ Review every skipped commit. Git may skip a local patch when upstream independen
    - `forge.config.ts` — usually auto-merges, but verify:
      - `asar.unpack: "**/node_modules/keyspy/**/*"` preserved.
      - `extraResource: ["web-dist"]` preserved.
-     - `prePackage` / `postPackage` hooks preserved.
-     - New upstream flatpak/metainfo changes (e.g. `runtimeVersion`, zypak tag, screenshot URL) adopted.
+      - `prePackage` / `postPackage` hooks preserved.
+      - New upstream flatpak/metainfo changes (e.g. `runtimeVersion`, zypak tag, screenshot URL) adopted.
+      - Flatpak remains configuration-only in the fork release flow; do not restore upstream release publication steps.
+   - `.mise/tasks/assets/_default` → initialize the assets submodule directly without a forced deinit or destructive fallback dependency.
 5. **Review approved decisions:** before staging, summarize each material area, the user's selected approach, and how the implementation reflects it. Ask again if the implemented tradeoff differs materially from what was approved.
 6. **After resolving:** `git add -A`, `git commit` (uses `.git/MERGE_MSG`).
 7. **Sanity checks before pushing:**
