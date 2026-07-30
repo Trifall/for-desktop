@@ -330,7 +330,7 @@ Relevant files include:
   ```
 
 - Run `pnpm package` after Electron main, preload, native dependency, Forge, protocol, or packaging changes.
-- Run the relevant `pnpm make --platform=... --targets=@electron-forge/maker-zip` path for release or platform-specific changes.
+- Run the relevant `pnpm make --platform=... --arch=x64 --targets=zip --skip-package` path after packaging for release or platform-specific changes.
 - Run `git diff --check` and inspect the complete final diff.
 - Check for unresolved conflicts and inspect status after build commands.
 - Verify package contents, not only command exit status, for native modules, keyspy binaries, unpacked files, and `web-dist`.

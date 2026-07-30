@@ -125,32 +125,32 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libx11-dev libxi-dev
 
-      - name: Clear Vite cache
-        run: rm -rf .vite
+      - name: Clear desktop build output
+        run: rm -rf .vite out/Stoat-linux-x64 out/make/zip/linux/x64
 
       - name: Build desktop app
-        run: pnpm package
+        run: pnpm package --platform=linux --arch=x64
 
       - name: Create distributable ZIP
-        run: |
-          rm -rf out/Stoat-linux-*
-          pnpm make --platform=linux --targets=@electron-forge/maker-zip
+        run: pnpm make --platform=linux --arch=x64 --targets=zip --skip-package
 
       - name: Find ZIP file
         id: find-zip
         run: |
-          ZIP_FILE=$(ls -t out/make/zip/linux/x64/*.zip 2>/dev/null | head -1)
-          if [ -n "$ZIP_FILE" ]; then
+          shopt -s nullglob
+          ZIP_FILES=(out/make/zip/linux/x64/*.zip)
+          if [ "${#ZIP_FILES[@]}" -eq 1 ]; then
+            ZIP_FILE="${ZIP_FILES[0]}"
             INPUT_VERSION="${{ github.event.inputs.version }}"
             VERSION=${INPUT_VERSION:-${GITHUB_REF_NAME}}
             VERSION=${VERSION#v}
             NEW_NAME="Stoat-Desktop-linux-x64-${VERSION}.zip"
-            cp "$ZIP_FILE" "out/make/zip/linux/x64/$NEW_NAME"
+            mv "$ZIP_FILE" "out/make/zip/linux/x64/$NEW_NAME"
             echo "zip_path=out/make/zip/linux/x64/$NEW_NAME" >> $GITHUB_OUTPUT
             echo "zip_name=$NEW_NAME" >> $GITHUB_OUTPUT
             echo "Found ZIP: $ZIP_FILE -> $NEW_NAME"
           else
-            echo "ERROR: ZIP file not found"
+            echo "ERROR: Expected exactly one ZIP in out/make/zip/linux/x64, found ${#ZIP_FILES[@]}"
             exit 1
           fi
 
@@ -162,7 +162,9 @@ jobs:
           retention-days: 30
 
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
+    env:
+      npm_config_msvs_version: "2022"
 
     steps:
       - name: Checkout desktop repo
@@ -203,6 +205,12 @@ jobs:
           node-version: "24"
           cache: "pnpm"
           cache-dependency-path: "**/pnpm-lock.yaml"
+
+      - name: Configure MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+          vsversion: "2022"
 
       - name: Setup Mise
         uses: jdx/mise-action@v4
@@ -288,33 +296,32 @@ jobs:
       - name: Install MinGW (for keyspy)
         run: choco install mingw -y
 
-      - name: Clear Vite cache
-        run: Remove-Item -Recurse -Force .vite -ErrorAction SilentlyContinue
+      - name: Clear desktop build output
+        run: Remove-Item -Recurse -Force .vite, out/Stoat-win32-x64, out/make/zip/win32/x64 -ErrorAction SilentlyContinue
 
       - name: Build desktop app
-        run: pnpm package
+        run: pnpm package --platform=win32 --arch=x64
 
       - name: Create distributable ZIP
-        run: |
-          Remove-Item -Recurse -Force out/Stoat-win32-* -ErrorAction SilentlyContinue
-          pnpm make --platform=win32 --targets=@electron-forge/maker-zip
+        run: pnpm make --platform=win32 --arch=x64 --targets=zip --skip-package
 
       - name: Find ZIP file
         id: find-zip
         shell: pwsh
         run: |
-          $zipFile = Get-ChildItem out/make/zip/win32/x64/*.zip | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if ($zipFile) {
+          $zipFiles = @(Get-ChildItem -Path "out/make/zip/win32/x64" -Filter "*.zip" -File -ErrorAction SilentlyContinue)
+          if ($zipFiles.Count -eq 1) {
+            $zipFile = $zipFiles[0]
             $inputVersion = "${{ github.event.inputs.version }}"
             $version = if ($inputVersion) { $inputVersion } else { $env:GITHUB_REF_NAME }
             $version = $version -replace '^v', ''
             $newName = "Stoat-Desktop-win32-x64-$version.zip"
-            Copy-Item $zipFile.FullName "out/make/zip/win32/x64/$newName"
+            Move-Item $zipFile.FullName "out/make/zip/win32/x64/$newName"
             echo "zip_path=out/make/zip/win32/x64/$newName" >> $env:GITHUB_OUTPUT
             echo "zip_name=$newName" >> $env:GITHUB_OUTPUT
             Write-Host "Found ZIP: $($zipFile.FullName) -> $newName"
           } else {
-            Write-Error "ERROR: ZIP file not found"
+            Write-Error "ERROR: Expected exactly one ZIP in out/make/zip/win32/x64, found $($zipFiles.Count)"
             exit 1
           }
 
@@ -334,7 +341,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0  # required for git log + tag history
+          fetch-depth: 0 # required for git log + tag history
 
       - name: Download Linux artifact
         uses: actions/download-artifact@v8

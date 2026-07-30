@@ -48,14 +48,15 @@ The workflow replicates `build-standalone.sh`:
 
 ### Linux
 - **Target**: `linux-x64`
-- **Output**: `Stoat-linux-x64-*.zip`
+- **Output**: `Stoat-Desktop-linux-x64-*.zip`
 - **Requirements**: X11 or XWayland, libx11, libxtst, libxt, libxinerama
 - **Runner**: `ubuntu-latest`
 
 ### Windows
 - **Target**: `win32-x64`
-- **Output**: `Stoat-win32-x64-*.zip`
-- **Runner**: `windows-latest`
+- **Output**: `Stoat-Desktop-win32-x64-*.zip`
+- **Runner**: `windows-2022`
+- **Toolchain**: Visual Studio 2022 C++ environment, selected explicitly for `node-gyp`
 
 ### macOS (Not Implemented)
 Currently not supported due to iohook keyboard issues on macOS.
@@ -89,7 +90,8 @@ Runs on Ubuntu and builds the Linux version:
 
 #### `build-windows`
 Runs on Windows and builds the Windows version:
-- Downloads Windows iohook binaries automatically (via forge.config.ts)
+- Configures the Visual Studio 2022 C++ environment before installing native dependencies
+- Compiles the keyspy Windows server with MinGW during packaging
 - Same build process as Linux
 - Creates Windows ZIP
 
@@ -153,9 +155,16 @@ Do not rebuild `$env:Path` from only the machine and user environment variables.
 The `pnpm/action-setup` installs pnpm. Make sure your `packageManager` field in `package.json` is set correctly.
 
 ### ZIP Not Found
-Check the `forge.config.ts` to ensure the maker-zip output path matches what the workflow expects:
+The workflow packages once, then runs the configured Forge target by its maker name with `--targets=zip --skip-package`. Do not delete `out/Stoat-<platform>-x64` between the package and make steps because it is the input to `--skip-package`.
+
+Forge 7.11 can print an empty `Making for the following targets:` progress line even when the ZIP target resolved. The later `Making a zip distributable` line is the useful confirmation.
+
+Check the `forge.config.ts` to ensure `new MakerZIP({})` is configured and the output path matches what the workflow expects:
 - Linux: `out/make/zip/linux/x64/*.zip`
 - Windows: `out/make/zip/win32/x64/*.zip`
+
+### Windows Build Fails: Visual Studio Not Found
+The `register-scheme` dependency invokes `node-gyp` during installation. Keep the Windows job on `windows-2022`, configure `ilammy/msvc-dev-cmd` before either dependency install, and keep `npm_config_msvs_version` set to `2022`. This ensures `node-gyp` can find the hosted runner's Visual Studio C++ workload.
 
 ### Audio Assets Missing
 Ensure `client/packages/client/scripts/assets_fallback/audio/` exists with all 7 .wav files in the stoat-for-web repo.
@@ -199,7 +208,7 @@ Edit the `node-version` in the workflow:
 To build other formats (deb, rpm, etc.), modify the maker command:
 ```yaml
 run: |
-  pnpm make --platform=linux --targets=@electron-forge/maker-zip,@electron-forge/maker-deb
+  pnpm make --platform=linux --targets=zip,deb
 ```
 
 Then update the find-zip step to handle multiple outputs.

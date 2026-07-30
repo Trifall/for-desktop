@@ -297,7 +297,7 @@ All five are **deleted** in the fork (we don't use release-please, git-town, or 
   - Triggers on `push` of any `v*` tag, or via `workflow_dispatch` with a version input.
   - Runs two build jobs:
     - **`build-linux`** on `ubuntu-latest` → produces `out/make/zip/linux/x64/Stoat-Desktop-linux-x64-<version>.zip`.
-    - **`build-windows`** on `windows-latest` → produces `out/make/zip/win32/x64/Stoat-Desktop-win32-x64-<version>.zip`.
+    - **`build-windows`** on `windows-2022` → produces `out/make/zip/win32/x64/Stoat-Desktop-win32-x64-<version>.zip`.
   - Each job:
     1. Checks out the desktop repo (this repo) with `fetch-depth: 0`.
     2. Pulls the `assets` submodule with `git submodule update --init assets`.
@@ -307,8 +307,8 @@ All five are **deleted** in the fork (we don't use release-please, git-town, or 
     6. Copies `client/packages/client/dist/*` into `web-dist/`.
     7. Installs **desktop** deps with `pnpm install --frozen-lockfile`.
     8. Installs platform build deps (Linux: `libx11-dev libxi-dev`; Windows: `mingw` via chocolatey) — needed by the keyspy `prePackage` hook.
-    9. Clears the Vite cache (`.vite`).
-    10. Runs `pnpm package` then `pnpm make --platform=<platform> --targets=@electron-forge/maker-zip`.
+    9. Clears the Vite cache and platform-specific package/ZIP output.
+    10. Runs one explicit x64 `pnpm package`, then reuses that output with `pnpm make --platform=<platform> --arch=x64 --targets=zip --skip-package`.
     11. Finds the resulting zip, renames it with the version, uploads as a workflow artifact.
 - **`create-release`** job (only on tag/manual-with-v-prefix) depends on both build jobs, downloads both artifacts, generates a changelog from `git log` between the current and previous `v*` tag, and creates a GitHub Release with `softprops/action-gh-release@v3` attaching both zips.
 - `.github/workflows/README.md` — documentation for the workflow, including triggering, customization, `act`-based local testing, and required secrets.
@@ -320,6 +320,8 @@ All five are **deleted** in the fork (we don't use release-please, git-town, or 
 - Both build jobs assume `pnpm install --frozen-lockfile` — keep `pnpm-lock.yaml` in sync with `package.json` when changing deps.
 - The keyspy build deps install step is version-aware enough to not break if upstream bumps Electron. It installs system packages only, no version pinning of pnpm/electron.
 - Keep `jdx/mise-action` on v4 or newer. Current client mise installs Node and pnpm from `client/.mise/config.toml`; on Windows, these tools require the action's `mise-shim.exe` setup. Mise 2026.7.7 can still lose Node at its nested Windows task-process boundary even while PowerShell resolves Node correctly, so the Windows job expands the relevant `client/.mise/tasks/` operations into direct pnpm commands. Keep those commands synchronized with the client tasks. Do not "fix" this by reconstructing PATH from machine/user environment variables because that drops paths GitHub added through `GITHUB_PATH`.
+- Keep the Windows release job on `windows-2022`, run `ilammy/msvc-dev-cmd` before installing client or desktop dependencies, and set `npm_config_msvs_version: "2022"`. The Git-hosted `register-scheme` dependency invokes `node-gyp` during installation and requires a discoverable Visual Studio C++ toolchain.
+- Use the configured `MakerZIP` target name `zip`. Package once and use `--skip-package`; deleting `out/Stoat-<platform>-x64` before `make` removes the package that `--skip-package` needs. Forge 7.11's progress renderer may leave the initial target list blank even when the target resolved; the subsequent `Making a zip distributable` task is authoritative.
 - Keep the workflow actions on Node 24-capable major versions or newer: `actions/checkout@v7`, `actions/setup-node@v7`, `actions/upload-artifact@v7`, `actions/download-artifact@v8`, `pnpm/action-setup@v6`, and `softprops/action-gh-release@v3`. Older majors emit Node 20 action-runtime deprecation warnings even when the configured build toolchain itself is newer.
 - Both web-client build steps must set `VITE_CFG_ENABLE_VIDEO: "true"`. The client's local ignored `.env` enables camera/screenshare for developer builds, but CI checkouts do not contain it. Omitting the workflow environment variable produces a valid bundle whose camera and screen-share buttons say "Coming soon!" despite the desktop screen-picker integration being present.
 - Both web-client build steps must set `VITE_RELEASE_TAG` from the workflow version input or pushed tag. The paired client uses this build-time value in its settings sidebar and falls back to its upstream package version when it is absent.
