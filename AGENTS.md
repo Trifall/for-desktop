@@ -261,6 +261,7 @@ Relevant files include:
 - Keep Linux and Windows client build steps behaviorally synchronized even though Windows currently expands mise tasks into direct pnpm commands.
 - Preserve the Windows direct-command workaround for mise's nested task PATH loss.
 - Keep GitHub Actions on Node 24-capable major versions or newer.
+- Keep the release workflow's Electron Forge phase on Node 22 until the upstream Node 24 finalization bug in Forge 7.11 / `@electron/packager` 18.4.4 is resolved; Node 24 remains the paired web build runtime.
 - Preserve action-runtime versions, artifact names, ZIP naming, changelog generation, and the two-platform release flow together.
 - Keep desktop and paired-web lockfiles frozen in CI after intentional regeneration.
 - Update `.github/workflows/README.md` when workflow inputs, artifacts, prerequisites, or release behavior change.

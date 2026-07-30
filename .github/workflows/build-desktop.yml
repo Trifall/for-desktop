@@ -49,7 +49,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
 
-      - name: Setup Node.js
+      - name: Setup Node.js for web client
         uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -116,6 +116,11 @@ jobs:
           rm -rf web-dist
           mkdir -p web-dist
           cp -r client/packages/client/dist/* web-dist/
+
+      - name: Setup Node.js for Electron Forge
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
 
       - name: Install desktop dependencies
         run: pnpm install --frozen-lockfile
@@ -199,7 +204,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
 
-      - name: Setup Node.js
+      - name: Setup Node.js for web client
         uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -289,6 +294,11 @@ jobs:
           Remove-Item -Recurse -Force web-dist -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path web-dist
           Copy-Item -Recurse -Force client/packages/client/dist/* web-dist/
+
+      - name: Setup Node.js for Electron Forge
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
 
       - name: Install desktop dependencies
         run: pnpm install --frozen-lockfile

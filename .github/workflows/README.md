@@ -159,6 +159,8 @@ The workflow packages once, then runs the configured Forge target by its maker n
 
 Forge 7.11 can print an empty `Making for the following targets:` progress line even when the ZIP target resolved. The later `Making a zip distributable` line is the useful confirmation.
 
+If `package` stops at `Finalizing package` without an error or output directory, verify the desktop phase is using Node 22. Electron Forge 7.11 and its `@electron/packager` 18.4.4 dependency can silently exit there on Node 24 ([electron/forge#4282](https://github.com/electron/forge/issues/4282)). The workflow intentionally switches from Node 24 to Node 22 after building the web client.
+
 Check the `forge.config.ts` to ensure `new MakerZIP({})` is configured and the output path matches what the workflow expects:
 - Linux: `out/make/zip/linux/x64/*.zip`
 - Windows: `out/make/zip/win32/x64/*.zip`
@@ -197,11 +199,23 @@ If macOS support is added in the future:
 ```
 
 ### Change Node.js Version
-Edit the `node-version` in the workflow:
+The workflow deliberately uses separate Node versions for the web and desktop phases:
+
+- Node 24 builds the paired web client.
+- Node 22 installs desktop dependencies and runs Electron Forge.
+
+Keep the Electron Forge phase on Node 22 until the Node 24 finalization incompatibility described above is resolved. Each version is configured through its corresponding `actions/setup-node` step:
+
 ```yaml
-- uses: actions/setup-node@v7
+- name: Setup Node.js for web client
+  uses: actions/setup-node@v7
   with:
-    node-version: '24'
+    node-version: "24"
+
+- name: Setup Node.js for Electron Forge
+  uses: actions/setup-node@v7
+  with:
+    node-version: "22"
 ```
 
 ### Add More Makers
