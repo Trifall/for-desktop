@@ -824,6 +824,10 @@ export function initPushToTalk(): void {
 
   ipcMain.on("push-to-talk-manual", (_, data: { active: boolean }) => {
     pttLog("Manual PTT state:", data.active);
+    if (releaseDelayTimeout) {
+      clearTimeout(releaseDelayTimeout);
+      releaseDelayTimeout = null;
+    }
     isPttActive = data.active;
     sendPttState(data.active);
   });
