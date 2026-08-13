@@ -68,7 +68,6 @@ jobs:
           rm -rf client/packages/client/dist client/packages/client/dist-prod
           rm -rf client/packages/stoat.js/dist
           rm -rf client/packages/solid-livekit-components/dist
-          rm -rf client/packages/js-lingui-solid/packages/*/dist
 
       - name: Install dependencies (Client)
         working-directory: client
@@ -228,10 +227,6 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item -Recurse -Force client/packages/client/dist, client/packages/client/dist-prod, client/packages/stoat.js/dist, client/packages/solid-livekit-components/dist -ErrorAction SilentlyContinue
-          $dirs = Get-ChildItem -Path "client/packages/js-lingui-solid/packages" -Directory
-          foreach ($dir in $dirs) {
-            Remove-Item -Recurse -Force "$($dir.FullName)/dist" -ErrorAction SilentlyContinue
-          }
 
       - name: Install dependencies (Client)
         working-directory: client
