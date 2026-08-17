@@ -26,6 +26,7 @@ It is intended as a reference for both humans and AI agents working on the fork 
 10. [Material Conflict Escalation and User Approval](#10-material-conflict-escalation-and-user-approval)
 11. [Upstream Merge Checklist](#11-upstream-merge-checklist)
 12. [Known Issues / Gotchas](#12-known-issues--gotchas)
+13. [Wayland Virtual Microphone](#13-wayland-virtual-microphone)
 
 ---
 
@@ -43,6 +44,7 @@ Approximate footprint (as of the latest merge):
 ```
 .github/workflows/README.md             | 213 ++++++++
 .github/workflows/build-desktop.yml     | 373 +++++++++++++
+.github/build/appimage/                 |   3 files
 .github/workflows/build.yml             |  28 -    (deleted upstream file)
 .github/workflows/git-town.yml         |  19 -    (deleted upstream file)
 .github/workflows/release-please.yml    |  88 -    (deleted upstream file)
@@ -62,6 +64,7 @@ src/main.ts                             |  59 ++-
 src/native/config.ts                    | 103 ++++
 src/native/pushToTalk.ts                | 882 +++++++++++++++++++++++++++++++  (new)
 src/native/tray.ts                      |  19 +-
+src/native/virtualMic.ts                |  new
 src/native/window.ts                    | 150 +++-
 src/preload.ts                          |  1 +
 src/world/pushToTalk.ts                 | 280 ++++++++++    (new)
@@ -69,14 +72,14 @@ strings.ts                              |   0
 vite.main.config.ts                     |  14 +-
 ```
 
-| Category | Files |
-|---|---|
-| New feature modules | `src/native/pushToTalk.ts`, `src/world/pushToTalk.ts` |
-| Modified native modules | `src/native/window.ts`, `src/native/config.ts`, `src/native/tray.ts` |
-| Modified entry points | `src/main.ts`, `src/preload.ts`, `src/config.d.ts` |
-| Build config | `forge.config.ts`, `vite.main.config.ts`, `package.json`, `pnpm-workspace.yaml`, `patches/cross-zip@4.0.1.patch` |
-| CI/CD | `.github/workflows/build-desktop.yml`, `.github/workflows/README.md` (replaces upstream's release/validate workflows) |
-| Docs | `README.md`, `SETUP_GUIDE.md`, `fork-changes.md` (this file) |
+| Category                | Files                                                                                                                 |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| New feature modules     | `src/native/pushToTalk.ts`, `src/world/pushToTalk.ts`, `src/native/virtualMic.ts`                                     |
+| Modified native modules | `src/native/window.ts`, `src/native/config.ts`, `src/native/tray.ts`                                                  |
+| Modified entry points   | `src/main.ts`, `src/preload.ts`, `src/config.d.ts`                                                                    |
+| Build config            | `forge.config.ts`, `vite.main.config.ts`, `package.json`, `pnpm-workspace.yaml`, `patches/cross-zip@4.0.1.patch`      |
+| CI/CD                   | `.github/workflows/build-desktop.yml`, `.github/workflows/README.md` (replaces upstream's release/validate workflows) |
+| Docs                    | `README.md`, `SETUP_GUIDE.md`, `fork-changes.md` (this file)                                                          |
 
 ---
 
@@ -87,30 +90,31 @@ The single biggest fork addition. PTT lets users hold/toggle a hotkey to unmute 
 ### 2.1 Why it exists
 
 Upstream has no push-to-talk. The fork needed:
+
 - **Hold mode** (press-to-talk, release-to-mute) with optional release delay.
 - **Toggle mode** (one press = unmute, next press = mute).
 - **Global hotkey**: fire even when the app is blurred, on Linux (XWayland) and Windows.
-- **Allow typing the PTT key** in chat when the window *is* focused.
+- **Allow typing the PTT key** in chat when the window _is_ focused.
 - **Multiple keybinds** stored as a JSON array (with a single-string legacy fallback).
 
 Neither Electron's `globalShortcut` nor `iohook` worked reliably, so the fork eventually settled on the **`keyspy`** native module, which spawns a separate native binary per platform (`WinKeyServer.exe` on Windows, `X11KeyServer` on Linux, `MacKeyServer` on macOS) and communicates over stdio.
 
 ### 2.2 Files involved
 
-| Path | Role |
-|---|---|
-| `src/native/pushToTalk.ts` (882 lines) | **Main-process PTT engine.** Loads `keyspy`, registers IPC, manages keyspy lifecycle, watchdog, crash recovery, hold/toggle logic, window focus/blur handling, and the dual input path (focused `before-input-event` vs blurred keyspy global events). |
-| `src/world/pushToTalk.ts` (280 lines) | **Preload/renderer bridge.** Exposes `window.pushToTalk` with `onStateChange`, `setManualState`, `getCurrentState`, `isAvailable`, `updateSettings`, `getConfig`, `onConfigChange`, etc. Adds capture-phase `keydown`/`keyup` DOM listeners to stop propagation of the PTT key (so the web client's own handlers don't fire) while still allowing typing in input fields. |
-| `src/preload.ts` | Imports `./world/pushToTalk` so the bridge loads. |
-| `src/config.d.ts` | Type declarations for `window.pushToTalk` and the `DesktopConfig` PTT fields. |
-| `src/native/config.ts` | Adds `pushToTalk`, `pushToTalkKeybind`, `pushToTalkMode`, `pushToTalkReleaseDelay` to the `electron-store` schema + setters with side effects (re-registering/cleaning up the hotkey). |
-| `src/main.ts` | Imports `initPushToTalk` / `cleanupPushToTalk`. Calls `initPushToTalk()` in `app.on("ready")` (after `initDiscordRpc()`). Calls `cleanupPushToTalk()` on `window-all-closed` and `before-quit`. |
-| `forge.config.ts` | `packagerConfig.asar.unpack = "**/node_modules/keyspy/**/*"` (keyspy spawns a native child process and cannot live inside asar) and `prePackage`/`postPackage` hooks that compile keyspy's native server binaries at package time and copy `keyspy` + `@expo/sudo-prompt` into `app.asar.unpacked/node_modules/`. |
-| `vite.main.config.ts` | Marks `keyspy` (and `bufferutil`, `utf-8-validate`) as `external` — they must not be bundled by Vite. |
-| `package.json` | Declares `keyspy: ^1.1.1` as a runtime dependency and `electron-rebuild: ^3.2.9` as a dev dependency (used to rebuild native modules against Electron's headers). |
-| `pnpm-workspace.yaml` | `nodeLinker: hoisted` — keyspy expects a hoisted node_modules layout. Its `allowBuilds` map includes native dependencies such as `keyspy`, `lzma-native`, `bufferutil`, and `utf-8-validate`. |
-| `.github/workflows/build-desktop.yml` | Installs `libx11-dev libxi-dev` on Linux and `mingw` on Windows so the `prePackage` hook can compile the keyspy servers. |
-| `assets` submodule | Provides the desktop tray icon. (Not PTT-specific but related — see §6.) |
+| Path                                   | Role                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/native/pushToTalk.ts` (882 lines) | **Main-process PTT engine.** Loads `keyspy`, registers IPC, manages keyspy lifecycle, watchdog, crash recovery, hold/toggle logic, window focus/blur handling, and the dual input path (focused `before-input-event` vs blurred keyspy global events).                                                                                                                    |
+| `src/world/pushToTalk.ts` (280 lines)  | **Preload/renderer bridge.** Exposes `window.pushToTalk` with `onStateChange`, `setManualState`, `getCurrentState`, `isAvailable`, `updateSettings`, `getConfig`, `onConfigChange`, etc. Adds capture-phase `keydown`/`keyup` DOM listeners to stop propagation of the PTT key (so the web client's own handlers don't fire) while still allowing typing in input fields. |
+| `src/preload.ts`                       | Imports `./world/pushToTalk` so the bridge loads.                                                                                                                                                                                                                                                                                                                         |
+| `src/config.d.ts`                      | Type declarations for `window.pushToTalk` and the `DesktopConfig` PTT fields.                                                                                                                                                                                                                                                                                             |
+| `src/native/config.ts`                 | Adds `pushToTalk`, `pushToTalkKeybind`, `pushToTalkMode`, `pushToTalkReleaseDelay` to the `electron-store` schema + setters with side effects (re-registering/cleaning up the hotkey).                                                                                                                                                                                    |
+| `src/main.ts`                          | Imports `initPushToTalk` / `cleanupPushToTalk`. Calls `initPushToTalk()` in `app.on("ready")` (after `initDiscordRpc()`). Calls `cleanupPushToTalk()` on `window-all-closed` and `before-quit`.                                                                                                                                                                           |
+| `forge.config.ts`                      | `packagerConfig.asar.unpack = "**/node_modules/keyspy/**/*"` (keyspy spawns a native child process and cannot live inside asar) and `prePackage`/`postPackage` hooks that compile keyspy's native server binaries at package time and copy `keyspy` + `@expo/sudo-prompt` into `app.asar.unpacked/node_modules/`.                                                         |
+| `vite.main.config.ts`                  | Marks `keyspy` (and `bufferutil`, `utf-8-validate`) as `external` — they must not be bundled by Vite.                                                                                                                                                                                                                                                                     |
+| `package.json`                         | Declares `keyspy: ^1.1.1` as a runtime dependency and `electron-rebuild: ^3.2.9` as a dev dependency (used to rebuild native modules against Electron's headers).                                                                                                                                                                                                         |
+| `pnpm-workspace.yaml`                  | `nodeLinker: hoisted` — keyspy expects a hoisted node_modules layout. Its `allowBuilds` map includes native dependencies such as `keyspy`, `lzma-native`, `bufferutil`, and `utf-8-validate`.                                                                                                                                                                             |
+| `.github/workflows/build-desktop.yml`  | Installs `libx11-dev libxi-dev` on Linux and `mingw` on Windows so the `prePackage` hook can compile the keyspy servers.                                                                                                                                                                                                                                                  |
+| `assets` submodule                     | Provides the desktop tray icon. (Not PTT-specific but related — see §6.)                                                                                                                                                                                                                                                                                                  |
 
 ### 2.3 How it boots
 
@@ -121,21 +125,21 @@ Neither Electron's `globalShortcut` nor `iohook` worked reliably, so the fork ev
 createMainWindow();
 initTray();
 initDiscordRpc();
-initPushToTalk();   // <-- fork
+initPushToTalk(); // <-- fork
 ```
 
 And on shutdown:
 
 ```ts
 app.on("window-all-closed", () => {
-  cleanupPushToTalk();     // <-- fork
+  cleanupPushToTalk(); // <-- fork
   if (process.platform !== "darwin") {
     process.kill(process.pid, "SIGKILL");
   }
 });
 
 app.on("before-quit", () => {
-  cleanupPushToTalk();     // <-- fork
+  cleanupPushToTalk(); // <-- fork
 });
 ```
 
@@ -151,10 +155,11 @@ If `config.pushToTalk` is true at boot, `initPushToTalk()` also calls `registerP
 
 PTT input is collected from **two** sources depending on window focus:
 
-1. **Window focused** → Electron's `webContents.on("before-input-event", handleBeforeInputEvent)` is used. The event is *not* `preventDefault`'d so the user can still **type** the PTT key in chat. The DOM-level listener in `src/world/pushToTalk.ts` stops propagation *after* letting the keystroke through, so the web client never fires its own handlers twice.
+1. **Window focused** → Electron's `webContents.on("before-input-event", handleBeforeInputEvent)` is used. The event is _not_ `preventDefault`'d so the user can still **type** the PTT key in chat. The DOM-level listener in `src/world/pushToTalk.ts` stops propagation _after_ letting the keystroke through, so the web client never fires its own handlers twice.
 2. **Window blurred** → `keyspy`'s `GlobalKeyboardListener` provides OS-wide keyboard events. The listener early-returns when `isWindowFocused` is true to avoid double-firing.
 
 The fork attaches `mainWindow.on("focus", focusHandler)` and `mainWindow.on("blur", blurHandler)` in `registerPushToTalkHotkey()` to:
+
 - Toggle `isWindowFocused`.
 - Clear `heldKeys` / `heldPttBindings` / `heldPttBindingsByKey` on the transition (a stuck key across a focus change would otherwise leave PTT stuck on).
 - In **hold mode only**, also call `deactivatePtt(...)` with `useDelay = false` so a blur doesn't leave the mic open. **Toggle mode intentionally does NOT deactivate on blur** — the user's toggle state is preserved.
@@ -185,13 +190,13 @@ There is also a `keyspyKeyToAccelerator()` map in `src/native/pushToTalk.ts` and
 
 ### 2.7 IPC channels (do not rename without updating the web client)
 
-| Channel | Direction | Payload |
-|---|---|---|
-| `push-to-talk` | main → renderer | `{ active: boolean }` |
-| `push-to-talk-config` | main → renderer | `{ enabled, keybind, mode, releaseDelay }` |
-| `push-to-talk-manual` | renderer → main | `{ active: boolean }` |
+| Channel                        | Direction       | Payload                                        |
+| ------------------------------ | --------------- | ---------------------------------------------- |
+| `push-to-talk`                 | main → renderer | `{ active: boolean }`                          |
+| `push-to-talk-config`          | main → renderer | `{ enabled, keybind, mode, releaseDelay }`     |
+| `push-to-talk-manual`          | renderer → main | `{ active: boolean }`                          |
 | `push-to-talk-update-settings` | renderer → main | `{ enabled?, keybind?, mode?, releaseDelay? }` |
-| `push-to-talk-request-config` | renderer → main | (none) |
+| `push-to-talk-request-config`  | renderer → main | (none)                                         |
 
 The paired web client fork (`Trifall/stoat-for-web`) listens for `push-to-talk` and renders the mic state in the voice UI (see `client/packages/client/components/rtc/state.tsx` referenced in `SETUP_GUIDE.md`). Renaming channels would break that integration.
 
@@ -209,14 +214,21 @@ Upstream loads the web client from `https://stoat.chat/app` (formerly `https://b
 
 ### 3.2 What was added in `src/native/window.ts`
 
-- **Imports:** `net` and `protocol` from `electron` (added on top of upstream's imports). *After the Electron 40 merge*, `desktopCapturer` and `session` are also imported from upstream's screen picker — both sets of imports must coexist.
+- **Imports:** `net` and `protocol` from `electron` (added on top of upstream's imports). _After the Electron 40 merge_, `desktopCapturer` and `session` are also imported from upstream's screen picker — both sets of imports must coexist.
 - **Scheme registration at module load:**
   ```ts
-  protocol.registerSchemesAsPrivileged([{
-    scheme: "stoat",
-    privileges: { standard: true, secure: true, allowServiceWorkers: true,
-                  supportFetchAPI: true, corsEnabled: true },
-  }]);
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: "stoat",
+      privileges: {
+        standard: true,
+        secure: true,
+        allowServiceWorkers: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+      },
+    },
+  ]);
   ```
   This runs at import time (before `app.ready`), which is required by Electron.
 - **`initBuildUrl()`** — replaces upstream's top-level `export const BUILD_URL = new URL(...)` with a function called in `app.on("ready")`. It searches three locations for `web-dist/index.html`:
@@ -236,17 +248,21 @@ Upstream loads the web client from `https://stoat.chat/app` (formerly `https://b
 `initBuildUrl()` is called at the start of `app.on("ready")`, before `createMainWindow()` (which consumes `BUILD_URL`).
 
 The `web-contents-created` `will-navigate` handler was extended to allow `stoat:` URLs through:
+
 ```ts
 if (url.protocol === "stoat:") return;
 ```
+
 Plus an `allowedOrigins` list of Stoat/Revolt API+CDN domains the window may navigate to — blocking everything else. Both of these are fork additions.
 
 ### 3.4 `webSecurity` flag
 
 In `createMainWindow()`:
+
 ```ts
 webSecurity: BUILD_URL.protocol === "https:",
 ```
+
 - `stoat://` (local) → `webSecurity: false` — needed so the local app can hit the HTTPS APIs.
 - `https://` (remote) → `webSecurity: true`.
 
@@ -258,7 +274,7 @@ Upstream hard-coded `webSecurity: true`. Don't change this without considering b
 - `.gitignore` ignores `web-dist` and `**/web-dist` — the directory is **not** committed. It's populated by:
   - **CI:** `build-desktop.yml` checks out `Trifall/stoat-for-web`, builds it with mise, and `cp -r client/packages/client/dist/* web-dist/` before `pnpm package`.
   - **Local dev:** `SETUP_GUIDE.md` documents running the web client dev server and pointing at it with `--force-server=http://localhost:5173`.
-- The `prePackage` / `postPackage` hooks in `forge.config.ts` *do not* copy `web-dist` — Forge does that via `extraResource`.
+- The `prePackage` / `postPackage` hooks in `forge.config.ts` _do not_ copy `web-dist` — Forge does that via `extraResource`.
 
 ---
 
@@ -283,6 +299,7 @@ These were added in commit `230e9f8` alongside the SPA fallback fix.
 ### 5.1 What was removed
 
 Upstream's `.github/workflows/` shipped:
+
 - `build.yml`
 - `git-town.yml`
 - `release-please.yml`
@@ -311,6 +328,8 @@ All five are **deleted** in the fork (we don't use release-please, git-town, or 
     10. Runs one explicit x64 `pnpm package`, then reuses that output with `pnpm make --platform=<platform> --arch=x64 --targets=zip --skip-package`.
     11. Finds the resulting zip, renames it with the version, uploads as a workflow artifact.
 - **`create-release`** job (only on tag/manual-with-v-prefix) depends on both build jobs, downloads both artifacts, generates a changelog from `git log` between the current and previous `v*` tag, and creates a GitHub Release with `softprops/action-gh-release@v3` attaching both zips.
+- **`build-appimage`** depends on the completed Linux ZIP, wraps that self-contained package in an x64 AppImage, emits matching zsync metadata, and uploads both without rebuilding the desktop or paired web client.
+- **`create-release`** also downloads the AppImage artifacts and attaches the ZIP, AppImage, and zsync files to the same release.
 - `.github/workflows/README.md` — documentation for the workflow, including triggering, customization, `act`-based local testing, and required secrets.
 
 ### 5.3 Important invariants
@@ -326,6 +345,9 @@ All five are **deleted** in the fork (we don't use release-please, git-town, or 
 - Keep the workflow actions on Node 24-capable major versions or newer: `actions/checkout@v7`, `actions/setup-node@v7`, `actions/upload-artifact@v7`, `actions/download-artifact@v8`, `pnpm/action-setup@v6`, and `softprops/action-gh-release@v3`. Older majors emit Node 20 action-runtime deprecation warnings even when the configured build toolchain itself is newer.
 - Both web-client build steps must set `VITE_CFG_ENABLE_VIDEO: "true"`. The client's local ignored `.env` enables camera/screenshare for developer builds, but CI checkouts do not contain it. Omitting the workflow environment variable produces a valid bundle whose camera and screen-share buttons say "Coming soon!" despite the desktop screen-picker integration being present.
 - Both web-client build steps must set `VITE_RELEASE_TAG` from the workflow version input or pushed tag. The paired client uses this build-time value in its settings sidebar and falls back to its upstream package version when it is absent.
+- The AppImage flow must consume the fork's renamed `Stoat-Desktop-linux-x64-<version>.zip`, keep updater metadata pointed at `Trifall/stoat-for-desktop`, and preserve the complete packaged directory including `resources/web-dist` and unpacked native modules.
+- Keep the AppImage container digest, Anylinux script/source commit, hook source, and versions/checksums for appimagetool, Sharun, mkdwarfs, and uruntime pinned. Release jobs must not execute mutable `latest` images, branch-head packaging scripts, or unverified tool binaries.
+- Keep the release-ref validation job ahead of both platform builds so an existing tag cannot receive assets built from a different manual-dispatch commit.
 - Release instructions must tell users to extract the complete archive into a fresh directory. Copying only the executable omits `resources/web-dist` and makes the app silently use the remote fallback client.
 
 ### 5.4 Why the upstream workflows were dropped
@@ -349,7 +371,8 @@ The fork's `package.json` carries forward:
   - `@homebridge/dbus-native`, `auto-launch`, `bufferutil`, `utf-8-validate` — some are fork-added dependencies for features below.
 - **`devDependencies`:**
   - `electron-rebuild: ^3.2.9` — fork-added; needed to rebuild native modules against new Electron versions when upstream bumps Electron. Upstream relies on `@electron-forge/plugin-auto-unpack-natives` instead.
-  - `electron: ^40.8.3` — **set by upstream's PR #193**, must stay in sync with upstream.
+  - `electron: ^43.4.0` — adopted from upstream 1.5.1 to fix Windows/macOS stream echo; native ABI and packaged PTT require revalidation when this changes.
+  - `@electron-forge/plugin-auto-unpack-natives: ^7.11.2` — required for the `node-pipewire` native binding.
 - **`packageManager`:** `pnpm@11.17.0+sha512:...` — pins pnpm via Corepack and matches `.mise/config.toml`. Regenerate and verify the lockfile with this version.
 
 ### 6.2 `forge.config.ts`
@@ -358,11 +381,13 @@ Fork additions on top of upstream:
 
 - **`packagerConfig.asar.unpack: "**/node_modules/keyspy/**/*"`** — required because keyspy spawns a native child process that cannot live inside asar. Lose this and packaged PTT silently breaks.
 - **`packagerConfig.extraResource: ["web-dist"]`** — ships the web client alongside the app for `stoat://` (see §3).
+- **Platform icon selection** — macOS uses the liquid-glass `.icon` asset while other platforms retain the existing icon base. Upstream's blanket `osxSign.optionsForFile` configuration is intentionally not carried because post-package native copies would invalidate the signature and one minimal entitlement set is unsafe for every helper.
+- **`packageAfterCopy`** — on Linux, stages only `node-pipewire`'s runtime `dist`, `LICENSE`, and `package.json` before asar/signing. The auto-unpack-natives plugin keeps its native binding outside asar.
 - **`prePackage(forgeConfig, platform)`** — compiles keyspy's native server binaries at package time:
   - `win32`: compiles `keyspy/native/WinKeyServer/main.cpp` → `keyspy/build/WinKeyServer.exe`. Uses `c++` on Windows or `x86_64-w64-mingw32-g++` (cross-compiling from Linux, links `-luser32 -lkernel32`).
   - `linux`: compiles `keyspy/native/X11KeyServer/main.cpp` → `keyspy/build/X11KeyServer`. Uses `c++ -lX11 -lXi`, then `strip`.
   - Other platforms: relies on prebuilt runtime binaries that ship with the keyspy npm package.
-  - Failures are logged as warnings, not fatal — a packaged build on a platform without these toolchains still produces *something*, just without working PTT.
+  - Failures are logged as warnings, not fatal — a packaged build on a platform without these toolchains still produces _something_, just without working PTT.
 - **`postPackage(forgeConfig, options)`** — recursively copies:
   - `node_modules/keyspy` → `resources/app.asar.unpacked/node_modules/keyspy`
   - `node_modules/@expo/sudo-prompt` → `resources/app.asar.unpacked/node_modules/@expo/sudo-prompt` (needed by auto-launch on some platforms).
@@ -373,23 +398,34 @@ Fork additions on top of upstream:
 ### 6.3 `vite.main.config.ts`
 
 ```ts
-external: ["keyspy", "electron", "bufferutil", "utf-8-validate"]
+external: [
+  "keyspy",
+  "electron",
+  "bufferutil",
+  "utf-8-validate",
+  "node-pipewire",
+];
 ```
-All four must stay external — Vite must not try to bundle them. `keyspy` requires native loading; `bufferutil`/`utf-8-validate` are optional native peers of `ws` (used by `discord-rpc`).
+
+All five must stay external — Vite must not try to bundle them. `keyspy` and `node-pipewire` require native loading; `bufferutil`/`utf-8-validate` are optional native peers of `ws` (used by `discord-rpc`).
 
 ### 6.4 `pnpm-workspace.yaml`
 
 - **`nodeLinker: hoisted`** — required. `keyspy` and the unpacked-modules copy logic assume a flat `node_modules` layout. Switching to `isolated` will break PTT in packaged builds.
-- **`allowBuilds`:** explicitly permits install scripts for `bufferutil`, `electron`, `electron-winstaller`, `esbuild`, `keyspy`, `lzma-native`, `register-scheme`, and `utf-8-validate`. Adding a native dependency without approving its build usually breaks frozen installs or packaged behavior.
+- **`allowBuilds`:** explicitly permits install scripts for `bufferutil`, `electron`, `electron-winstaller`, `esbuild`, `keyspy`, `lzma-native`, `node-pipewire`, `register-scheme`, and `utf-8-validate`. Adding a native dependency without approving its build usually breaks frozen installs or packaged behavior.
 - **`blockExoticSubdeps: false`:** required for the Git dependency used by `discord-rpc`.
 - **`patchedDependencies`:** `cross-zip@4.0.1: patches/cross-zip@4.0.1.patch` (see §7).
+- **`overrides.yauzl: ^3.3.1`:** preserves upstream's Node 26 extraction compatibility fix.
+- **`minimumReleaseAgeExclude`:** narrowly exempts exact `electron@43.4.0` and `node-pipewire@1.1.0` versions approved during the 1.5.1 merge; do not broaden the inherited seven-day cooldown policy.
 
 ### 6.5 `assets` submodule
 
 `.gitmodules` points at `https://github.com/stoatchat/assets` (upstream's asset repo). The fork consumes these assets but does **not** host its own copy. CI pulls the submodule with:
+
 ```bash
 git -c submodule."assets".update=checkout submodule update --init assets
 ```
+
 The `update = checkout` setting in `.gitmodules` matters when the submodule branch diverges — preserve it.
 
 The `mise assets` task initializes the pinned submodule without first deinitializing it. Do not restore an automatic `assets:fallback` dependency or another forced deinit step; routine asset setup must not discard local submodule work.
@@ -408,23 +444,26 @@ This patch is applied automatically by pnpm via the `patchedDependencies` entry 
 
 `src/native/config.ts` carries the full `electron-store` schema and a `Config` class with getters/setters. The fork added these fields (with defaults):
 
-| Field | Type | Default | Side effects |
-|---|---|---|---|
-| `pushToTalk` | boolean | `false` | setter calls `registerPushToTalkHotkey()` or `cleanupPushToTalk()` |
-| `pushToTalkKeybind` | string | `"Shift+Space"` | setter re-registers hotkey (if enabled) |
-| `pushToTalkMode` | `"hold" \| "toggle"` | `"hold"` | setter re-registers hotkey (if enabled) |
-| `pushToTalkReleaseDelay` | number (0–5000) | `0` | no side effect |
+| Field                    | Type                 | Default         | Side effects                                                       |
+| ------------------------ | -------------------- | --------------- | ------------------------------------------------------------------ |
+| `pushToTalk`             | boolean              | `false`         | setter calls `registerPushToTalkHotkey()` or `cleanupPushToTalk()` |
+| `pushToTalkKeybind`      | string               | `"Shift+Space"` | setter re-registers hotkey (if enabled)                            |
+| `pushToTalkMode`         | `"hold" \| "toggle"` | `"hold"`        | setter re-registers hotkey (if enabled)                            |
+| `pushToTalkReleaseDelay` | number (0–5000)      | `0`             | no side effect                                                     |
 
 `windowState` was already in upstream's schema; the original fork bug was a `config.sync()` call on first launch when `mainWindow` was still null. Commit `f44458e` added a guard at the top of `sync()`:
+
 ```ts
 sync() {
   if (!mainWindow) return;
   mainWindow.webContents.send("config", {...});
 }
 ```
+
 Don't remove this guard — first-launch crashes otherwise.
 
 The matching `DesktopConfig` type lives in `src/config.d.ts`. **Adding a new config field requires changing three places in lockstep:**
+
 1. `schema` and `defaults` in `src/native/config.ts`
 2. The `Config` class getters/setters and the `sync()` payload in `src/native/config.ts`
 3. `DesktopConfig` in `src/config.d.ts`
@@ -442,6 +481,7 @@ When merging upstream, these forks deletions must be preserved (do not let `git 
 - `.github/workflows/release-please.yml` — fork uses `softprops/action-gh-release` directly
 - `.github/workflows/release-webhook.yml` — not used
 - `.github/workflows/validate-pr-title.yml` — conflicts with upstream-merge commit messages
+- `.github/workflows/multiplatform_build.yml` — upstream validation does not bundle the paired web client, uses an incompatible packaging runtime, and omits fork native build dependencies
 
 Also `strings.ts` is an empty file at the repo root (kept around for historical reasons, harmless).
 
@@ -545,34 +585,39 @@ Review every skipped commit. Git may skip a local patch when upstream independen
 2. **Start a real merge (not a cherry-pick):** `git merge upstream/main --no-ff --no-commit` — preserves upstream history and avoids the "x commits behind" indicator.
 3. **Classify conflicts before resolving them:** compare both sides and §2–§9 of this document. Resolve routine, behavior-preserving conflicts directly. For every material behavioral or architectural conflict, follow §10 and obtain a separate user decision for that area before editing it.
 4. **Expected routine conflicts and their usual resolutions:** these instructions apply only while the underlying behavior still matches this document. If upstream has substantially redesigned one of these areas, treat it as a material conflict under §10 instead of applying this recipe blindly.
-   - Upstream `.github/workflows/build.yml`, `release-please.yml`, `release-webhook.yml`, `git-town.yml`, and `validate-pr-title.yml` (modify/delete) → keep the fork's deletion. The fork uses `build-desktop.yml` instead.
+   - Upstream `.github/workflows/build.yml`, `release-please.yml`, `release-webhook.yml`, `git-town.yml`, `validate-pr-title.yml`, and `multiplatform_build.yml` (modify/delete or clean addition) → keep the fork's deletion. The fork uses `build-desktop.yml` instead.
    - `package.json`:
      - Keep the fork's `scripts.start:x11`, `install:flatpak`, `run:flatpak`, `run:nix`.
      - Keep `--no-sandbox` on `start` (added by upstream PR #193 — keep it).
-      - Keep `electron-rebuild` in devDeps.
-      - Keep `keyspy` in dependencies.
-      - Adopt upstream's `electron: ^<latest>` version.
-      - Adopt upstream's pinned pnpm version and matching `.mise/config.toml` tool versions.
+     - Keep `electron-rebuild` in devDeps.
+     - Keep `keyspy` in dependencies.
+     - Adopt upstream's approved `electron: ^<latest>` version and preserve exact release-age exceptions when still needed.
+     - Keep exact optional `node-pipewire`, auto-unpack-natives, and its Linux-only packaging when Wayland screen audio remains enabled.
+     - Adopt upstream's pinned pnpm version and matching `.mise/config.toml` tool versions.
    - `pnpm-lock.yaml` → `git checkout --theirs pnpm-lock.yaml`, then `pnpm install --no-frozen-lockfile` to regenerate.
    - `src/native/window.ts`:
      - Keep `net` and `protocol` imports (fork).
      - Add upstream's new `desktopCapturer` and `session` imports (from the Electron 40 PR).
      - Keep `initBuildUrl()`, the privileged `stoat` scheme, `setupLocalProtocol()`, `localWebDir`, and `BUILD_URL` as `export let`.
      - Adopt upstream's `setDisplayMediaRequestHandler` + screen picker IPC inside `createMainWindow()`.
-     - Update the fallback URL inside `initBuildUrl()` to `https://stoat.chat/app` (upstream) — *not* `https://beta.revolt.chat`.
+     - Update the fallback URL inside `initBuildUrl()` to `https://stoat.chat/app` (upstream) — _not_ `https://beta.revolt.chat`.
    - `forge.config.ts` — usually auto-merges, but verify:
-     - `asar.unpack: "**/node_modules/keyspy/**/*"` preserved.
-     - `extraResource: ["web-dist"]` preserved.
-      - `prePackage` / `postPackage` hooks preserved.
-      - New upstream flatpak/metainfo changes (e.g. `runtimeVersion`, zypak tag, screenshot URL) adopted.
-      - Flatpak remains configuration-only in the fork release flow; do not restore upstream release publication steps.
+   - `asar.unpack: "**/node_modules/keyspy/**/*"` preserved.
+   - `extraResource: ["web-dist"]` preserved.
+     - `prePackage` / `postPackage` hooks preserved.
+     - Linux `packageAfterCopy` stages only the `node-pipewire` runtime files before auto-unpacking.
+     - macOS icon selection is preserved without restoring unsafe blanket signing configuration.
+   - New upstream flatpak/metainfo changes (e.g. `runtimeVersion`, zypak tag, screenshot URL) adopted.
+   - Flatpak remains configuration-only in the fork release flow; do not restore upstream release publication steps.
    - `.mise/tasks/assets/_default` → initialize the assets submodule directly without a forced deinit or destructive fallback dependency.
+   - `.gitmodules` → keep only the assets submodule with `update = checkout`; do not restore the retired `node-pipewire` submodule.
+   - `src/main.ts`, `src/constants.ts`, `src/native/virtualMic.ts`, and `src/world/window.ts` → keep one virtual-mic lifecycle owner and a synchronous Boolean `window.native.isWayland()` bridge while preserving all PTT and `initBuildUrl()` calls.
 5. **Review approved decisions:** before staging, summarize each material area, the user's selected approach, and how the implementation reflects it. Ask again if the implemented tradeoff differs materially from what was approved.
 6. **After resolving:** `git add -A`, `git commit` (uses `.git/MERGE_MSG`).
 7. **Sanity checks before pushing:**
    - `grep -r '<<<<<<<' .` returns nothing.
    - `npx tsc --noEmit` — expect pre-existing parser errors under `node_modules/type-fest` and `node_modules/@types/node`, but no errors in `src/`. The fork runs TypeScript 4.5.4 — don't try to "fix" dependency declarations in `node_modules`.
-   - `pnpm package` succeeds locally (or at least `npx tsc --noEmit` + a `pnpm install`).
+   - `pnpm package` succeeds locally (or at least `npx tsc --noEmit` + a `pnpm install`). Inspect Linux output for `node-pipewire` as well as keyspy and `web-dist`.
    - `pnpm lint` — pre-existing errors are expected; the merge must not **add** any.
 8. **Commit message:** keep the auto-generated `Merge remote-tracking branch 'upstream/main'`. Edit only to add a one-line summary of conflict resolutions if helpful.
 9. **Fetch immediately before pushing:** fetch `origin` and `upstream` again. Confirm both `git merge-base --is-ancestor origin/main main` and `git merge-base --is-ancestor upstream/main main` succeed, then `git push origin main`. The merge commit keeps the branch in sync with `upstream/main` (no "x commits behind" on the fork page).
@@ -585,11 +630,11 @@ Review every skipped commit. Git may skip a local patch when upstream independen
 
 Things that look like bugs but are actually load-bearing:
 
-- **`src/native/badges.ts` is never imported by `main.ts`.** The `ipcMain.on("setBadgeCount", ...)` listener it registers never fires; `window.native.setBadgeCount()` calls from the renderer are dropped silently. This is a **pre-existing fork condition**, *not* a merge regression. Fixing it is a separate task — but do not be alarmed during merges if a "missing setBadgeCount handler" appears in logs.
+- **`src/native/badges.ts` is never imported by `main.ts`.** The `ipcMain.on("setBadgeCount", ...)` listener it registers never fires; `window.native.setBadgeCount()` calls from the renderer are dropped silently. This is a **pre-existing fork condition**, _not_ a merge regression. Fixing it is a separate task — but do not be alarmed during merges if a "missing setBadgeCount handler" appears in logs.
 - **`tsconfig.json` has `types: ["electron-vite/node"]` but `electron-vite` isn't a direct dep** — works because the package is hoisted transitively. Pre-existing, presumably stale, harmless. Leave alone.
 - **`tsconfig.json#outDir: "dist"` is unused** — the real build output is `.vite/build/` per `package.json#main`. Pre-existing.
 - **TypeScript 4.5.4 produces parser errors under `node_modules/type-fest` and `node_modules/@types/node`** — pre-existing dependency declarations use syntax this compiler cannot parse. These errors come from `node_modules`; there should still be no errors in `src/`. Don't edit `node_modules` to suppress them — pin compatible dependency types or handle a TypeScript upgrade as a separate migration.
-- **Six pre-existing ESLint errors / four warnings on `main` after upstream 1.4.2** — the extra warning is the unused `autoLaunch` import left when upstream stopped enabling autostart on first launch. The merge must not introduce additional problems, but it is fine for `pnpm lint` to exit non-zero. Compare counts and paths against the pre-merge tip rather than treating a non-zero exit alone as a regression.
+- **Three pre-existing ESLint errors / one warning after upstream 1.5.1** — the errors are CommonJS `require()` calls in `src/native/window.ts`; the warning is the unused `version` import in `src/native/tray.ts`. The merge must not introduce additional problems, but it is fine for `pnpm lint` to exit non-zero. Compare counts and paths against this baseline rather than treating a non-zero exit alone as a regression.
 - **`start:x11` is required for Linux PTT** — under native Wayland, keyspy can't grab keys. `--ozone-platform=x11` forces XWayland on Linux. `SETUP_GUIDE.md` documents this.
 - **NVIDIA native Wayland uses software video decoding** — Chromium's accelerated decoder can render remote WebRTC video as persistent green macroblocks even though other receivers and the local capture preview are correct. `src/main.ts` detects the proprietary NVIDIA driver through `/proc/driver/nvidia/version` and appends `--disable-accelerated-video-decode` before Electron becomes ready when running native Wayland with Hardware Acceleration enabled. Preserve the narrower decode-only workaround so GPU compositing and encoding remain enabled; explicit `--ozone-platform=x11` launches do not need it.
 - **`web-dist/` is intentionally git-ignored** — don't commit it. The CI workflow populates it from the web client build.
@@ -600,4 +645,37 @@ Things that look like bugs but are actually load-bearing:
 
 ---
 
-*Last updated: after syncing upstream 1.4.2 and rebasing unpublished PTT lifecycle fixes onto the fork's existing upstream merge.*
+## 13. Wayland Virtual Microphone — `KEEP ON MERGE`
+
+Upstream 1.5.1 introduced PipeWire-based screen audio for Linux Wayland. The fork integrates the feature with corrected npm packaging and the synchronous bridge required by the paired web client.
+
+### 13.1 Runtime ownership
+
+- `src/constants.ts` owns the shared `stoat-virtual-sink`, `stoat-virtual-source`, and host-session Wayland constants.
+- `src/main.ts` calls `initVirtualMic()` once after creating the window and initializing tray/Discord/PTT contexts. It clears the routing poller before process termination.
+- `src/native/virtualMic.ts` starts `node-pipewire`, creates non-permanent stereo sink/source nodes when absent, waits for their ports, and polls for new non-Stoat output streams. Each poll verifies links and recreates missing virtual nodes after recoverable PipeWire graph resets. The native name-based linker is used only when the node name is unique across the current graph; duplicate names are skipped so a same-named Stoat stream cannot be routed accidentally, while the native thread resolves live ports without stale-ID races.
+- The approved behavior is always-on for the desktop process on a Wayland host session. It routes all non-Stoat application audio, not only the selected screen/window, and excludes Electron/Stoat clients to avoid call-audio feedback.
+- `src/world/window.ts` exposes `window.native.isWayland()` as a synchronous Boolean. Do not replace it with `ipcRenderer.invoke()`; the paired client intentionally rejects Promise/truthy values so the patch cannot activate on every platform.
+
+### 13.2 Paired web contract
+
+The paired `Trifall/stoat-for-web` client wraps `getDisplayMedia()` only when the synchronous bridge returns `true`. For audio-enabled shares it acquires `stoat-virtual-source`, stops/replaces Electron's original display-audio track, and falls back safely when the source is unavailable. The source is hidden from normal microphone settings and rejected as a persisted voice input so PTT, gain, RNNoise, and noise-gate processing never consume screen audio.
+
+### 13.3 Dependency and packaging
+
+- `node-pipewire` is exact optional npm dependency `1.1.0`; the upstream SSH git submodule and root `mise build:deps` task are intentionally removed.
+- `vite.main.config.ts` keeps it external.
+- `@electron-forge/plugin-auto-unpack-natives` unpacks its native binding.
+- Forge `packageAfterCopy` stages only `dist`, `LICENSE`, and `package.json` in Linux packages before asar/signing. Copying the complete npm package adds roughly 60 MB.
+- Linux CI installs `libpipewire-0.3-dev` before the frozen desktop install. Windows treats the dependency as optional and does not package it.
+- The Linux ZIP and derived AppImage must both retain the unpacked binding and runtime package files.
+
+### 13.4 Platform limits and validation
+
+Virtual screen audio does not make keyspy work on native Wayland. `start:x11` remains required for global PTT through XWayland. Because host environment variables may still report Wayland under XWayland, the virtual source can remain active in that mode by design.
+
+Test native Wayland screen/window sharing with and without audio, multiple applications, source failure, repeated shares, PipeWire restart, and feedback exclusion. Also test X11/XWayland display audio, packaged PTT, Windows/macOS Electron 43 loopback behavior, and package contents. The feature's all-application routing scope is intentional and must not be silently described as selected-window-only audio.
+
+---
+
+_Last updated: after integrating upstream 1.5.1 with corrected Wayland virtual-microphone packaging and the fork AppImage release path._

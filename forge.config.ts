@@ -130,68 +130,100 @@ const config: ForgeConfig = {
     },
     name: STRINGS.name,
     executableName: STRINGS.execName,
-    icon: `${ASSET_DIR}/icon`,
-    extraResource: [
-      "web-dist",
-    ],
+    icon:
+      process.platform === "darwin"
+        ? `${ASSET_DIR}/icon.icon`
+        : `${ASSET_DIR}/icon`,
+    extraResource: ["web-dist"],
   },
   rebuildConfig: {},
   makers,
   hooks: {
+    packageAfterCopy: async (_forgeConfig, buildPath, _version, platform) => {
+      if (platform !== "linux") return;
+
+      const source = path.join(__dirname, "node_modules", "node-pipewire");
+      const target = path.join(buildPath, "node_modules", "node-pipewire");
+
+      for (const entry of ["dist", "LICENSE", "package.json"]) {
+        fs.cpSync(path.join(source, entry), path.join(target, entry), {
+          recursive: true,
+        });
+      }
+    },
     prePackage: async (_forgeConfig, platform) => {
       const keyspyPath = path.join(__dirname, "node_modules", "keyspy");
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { execSync } = require("child_process");
-      
+
       if (platform === "win32") {
-        console.log("[prePackage] Building for Windows, compiling keyspy WinKeyServer...");
-        
-        const winServerSrc = path.join(keyspyPath, "native", "WinKeyServer", "main.cpp");
+        console.log(
+          "[prePackage] Building for Windows, compiling keyspy WinKeyServer...",
+        );
+
+        const winServerSrc = path.join(
+          keyspyPath,
+          "native",
+          "WinKeyServer",
+          "main.cpp",
+        );
         const buildDir = path.join(keyspyPath, "build");
         const winServerBin = path.join(buildDir, "WinKeyServer.exe");
-        
+
         fs.mkdirSync(buildDir, { recursive: true });
-        
+
         try {
           // On Windows, compile natively. On Linux cross-compiling to Windows, use mingw.
           if (process.platform === "win32") {
-            execSync(
-              `c++ "${winServerSrc}" -o "${winServerBin}" -static`,
-              { stdio: "inherit" }
-            );
+            execSync(`c++ "${winServerSrc}" -o "${winServerBin}" -static`, {
+              stdio: "inherit",
+            });
           } else {
             execSync(
               `x86_64-w64-mingw32-g++ -static -static-libgcc -static-libstdc++ -o "${winServerBin}" "${winServerSrc}" -luser32 -lkernel32`,
-              { stdio: "inherit" }
+              { stdio: "inherit" },
             );
           }
           console.log("[prePackage] WinKeyServer.exe compiled successfully");
         } catch (err) {
-          console.warn("[prePackage] Failed to compile WinKeyServer, Windows PTT may not work");
+          console.warn(
+            "[prePackage] Failed to compile WinKeyServer, Windows PTT may not work",
+          );
           console.warn("[prePackage] Error:", err);
         }
       } else if (platform === "linux") {
-        console.log("[prePackage] Building for Linux, compiling keyspy X11KeyServer...");
-        
-        const x11ServerSrc = path.join(keyspyPath, "native", "X11KeyServer", "main.cpp");
+        console.log(
+          "[prePackage] Building for Linux, compiling keyspy X11KeyServer...",
+        );
+
+        const x11ServerSrc = path.join(
+          keyspyPath,
+          "native",
+          "X11KeyServer",
+          "main.cpp",
+        );
         const buildDir = path.join(keyspyPath, "build");
         const x11ServerBin = path.join(buildDir, "X11KeyServer");
-        
+
         fs.mkdirSync(buildDir, { recursive: true });
-        
+
         try {
           execSync(
             `c++ "${x11ServerSrc}" -o "${x11ServerBin}" -lX11 -lXi -static-libgcc -static-libstdc++`,
-            { stdio: "inherit" }
+            { stdio: "inherit" },
           );
           execSync(`strip "${x11ServerBin}"`);
           console.log("[prePackage] X11KeyServer compiled successfully");
         } catch (err) {
-          console.warn("[prePackage] Failed to compile X11KeyServer, Linux PTT may not work");
+          console.warn(
+            "[prePackage] Failed to compile X11KeyServer, Linux PTT may not work",
+          );
           console.warn("[prePackage] Error:", err);
         }
       } else {
-        console.log(`[prePackage] Building for ${platform}, keyspy uses prebuilt runtime binaries`);
+        console.log(
+          `[prePackage] Building for ${platform}, keyspy uses prebuilt runtime binaries`,
+        );
       }
     },
     postPackage: async (_forgeConfig, options) => {
@@ -226,9 +258,18 @@ const config: ForgeConfig = {
         console.log("✓ keyspy copied successfully");
       }
 
-      const sudoPromptSource = path.join(__dirname, "node_modules", "@expo", "sudo-prompt");
-      const sudoPromptTarget = path.join(unpackedNodeModules, "@expo", "sudo-prompt");
-      
+      const sudoPromptSource = path.join(
+        __dirname,
+        "node_modules",
+        "@expo",
+        "sudo-prompt",
+      );
+      const sudoPromptTarget = path.join(
+        unpackedNodeModules,
+        "@expo",
+        "sudo-prompt",
+      );
+
       if (fs.existsSync(sudoPromptSource) && !fs.existsSync(sudoPromptTarget)) {
         console.log("Copying @expo/sudo-prompt to:", sudoPromptTarget);
         fs.mkdirSync(sudoPromptTarget, { recursive: true });
@@ -238,6 +279,10 @@ const config: ForgeConfig = {
     },
   },
   plugins: [
+    {
+      name: "@electron-forge/plugin-auto-unpack-natives",
+      config: {},
+    },
     new VitePlugin({
       // `build` can specify multiple entry builds, which can be Main process, Preload scripts, Worker process, etc.
       // If you are familiar with Vite configuration, it will look really familiar.

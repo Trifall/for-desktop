@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 import { version } from "../../package.json";
+import { isWayland } from "../constants";
 
 contextBridge.exposeInMainWorld("native", {
   versions: {
@@ -32,4 +33,6 @@ contextBridge.exposeInMainWorld("native", {
   },
   screenPickerCallback: (idx: number, audio: boolean) =>
     ipcRenderer.send("screenPickerCallback", idx, audio),
+
+  isWayland: () => isWayland,
 });

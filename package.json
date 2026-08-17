@@ -1,7 +1,7 @@
 {
   "name": "stoat-desktop",
   "productName": "stoat-desktop",
-  "version": "1.4.2",
+  "version": "1.5.1",
   "main": ".vite/build/main.js",
   "repository": "stoatchat/desktop",
   "scripts": {
@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.11.2",
+    "@electron-forge/maker-appx": "^7.11.2",
     "@electron-forge/maker-deb": "^7.11.2",
     "@electron-forge/maker-flatpak": "^7.11.2",
     "@electron-forge/maker-squirrel": "^7.11.2",
@@ -33,7 +34,6 @@
     "@electron-forge/plugin-fuses": "^7.11.2",
     "@electron-forge/plugin-vite": "^7.11.2",
     "@electron-forge/publisher-github": "^7.11.2",
-    "@electron-forge/maker-appx": "^7.11.2",
     "@electron/fuses": "^1.8.0",
     "@trivago/prettier-plugin-sort-imports": "^5.2.2",
     "@types/auto-launch": "^5.0.5",
@@ -41,13 +41,14 @@
     "@types/electron-squirrel-startup": "^1.0.2",
     "@typescript-eslint/eslint-plugin": "^5.62.0",
     "@typescript-eslint/parser": "^5.62.0",
-    "electron": "^40.8.3",
+    "electron": "^43.4.0",
     "electron-rebuild": "^3.2.9",
     "electron-vite": "^5.0.0",
     "electron-windows-store": "^2.1.0",
     "eslint": "^8.57.1",
     "eslint-plugin-import": "^2.32.0",
     "json-schema-typed": "^8.0.1",
+    "lodash": "^4.17.21",
     "prettier": "^3.6.2",
     "typescript": "~4.5.4",
     "vite": "^5.4.20"
@@ -63,6 +64,9 @@
     "keyspy": "^1.1.1",
     "update-electron-app": "^3.1.1",
     "utf-8-validate": "^6.0.5"
+  },
+  "optionalDependencies": {
+    "node-pipewire": "1.1.0"
   },
   "packageManager": "pnpm@11.17.0+sha512.cca3cea332ad254bb84145f966d19f4879615210346fc92c79a047f23a0d7b3cca3c3792f0076ba1f1831d277efbcf0a9119b31a9a60eca7fb3d6231f331ef72"
 }

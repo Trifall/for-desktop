@@ -36,6 +36,7 @@ declare interface Window {
     maximise: () => void;
     close: () => void;
     setBadgeCount: (count: number) => void;
+    isWayland: () => boolean;
   };
   pushToTalk: {
     onStateChange: (callback: (state: { active: boolean }) => void) => void;

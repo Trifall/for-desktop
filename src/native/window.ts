@@ -191,12 +191,20 @@ export function createMainWindow() {
   }
 
   // maximise the window if it was maximised before
-  if (config.windowState.isMaximised) {
+  if (config.windowState.isMaximised && !startHidden) {
     mainWindow.maximize();
   }
 
   // load the entrypoint
-  mainWindow.loadURL(BUILD_URL.toString());
+  const loadingWindow = mainWindow;
+  void loadingWindow
+    .loadURL(BUILD_URL.toString())
+    .then(() => {
+      if (!loadingWindow.isDestroyed()) {
+        loadingWindow.webContents.reload();
+      }
+    })
+    .catch((error) => console.error("Failed to load application URL:", error));
 
   // minimise window to tray
   mainWindow.on("close", (event) => {
@@ -324,8 +332,6 @@ export function createMainWindow() {
         .then((sources) => {
           // Shortcut for linux wayland.
           if (sources.length == 1) {
-            // TODO: Get audio to work with wayland
-            // See vencord for an implementation using a virtual microphone.
             request.audioRequested
               ? callback({
                   video: sources[0],

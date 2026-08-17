@@ -12,7 +12,28 @@ on:
         default: "v1.0.0"
 
 jobs:
+  validate-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout desktop repo
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Validate release ref
+        run: |
+          RELEASE_TAG="${{ github.event.inputs.version || github.ref_name }}"
+          if git rev-parse --verify --quiet "refs/tags/$RELEASE_TAG" >/dev/null; then
+            TAG_SHA=$(git rev-list -n 1 "$RELEASE_TAG")
+            if [ "$TAG_SHA" != "$GITHUB_SHA" ]; then
+              echo "Existing tag $RELEASE_TAG points to $TAG_SHA, not packaged commit $GITHUB_SHA" >&2
+              exit 1
+            fi
+          fi
+
   build-linux:
+    needs: validate-release
     runs-on: ubuntu-latest
 
     steps:
@@ -121,13 +142,13 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install desktop dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install keyspy build dependencies
+      - name: Install native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev libxi-dev
+          sudo apt-get install -y libpipewire-0.3-dev libx11-dev libxi-dev
+
+      - name: Install desktop dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Clear desktop build output
         run: rm -rf .vite out/Stoat-linux-x64 out/make/zip/linux/x64
@@ -165,7 +186,80 @@ jobs:
           path: ${{ steps.find-zip.outputs.zip_path }}
           retention-days: 30
 
+  build-appimage:
+    needs: build-linux
+    runs-on: ubuntu-latest
+    container: ghcr.io/pkgforge-dev/archlinux@sha256:f6fc7e14b0612a355d7ab50efb3cc40010ba28e4766860bd238d313b308f190b
+
+    steps:
+      - name: Checkout desktop repo
+        uses: actions/checkout@v7
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: stoat-desktop-linux
+          path: /tmp/stoat
+
+      - name: Prepare AppImage container
+        uses: pkgforge-dev/anylinux-setup-action@0964f2258d6c93d1391359978dde081fd8b3c6af
+        env:
+          QUICK_SHARUN: https://raw.githubusercontent.com/pkgforge-dev/Anylinux-AppImages/9ec9767d6b32dbc95242ffe055ca0833b9964941/useful-tools/quick-sharun.sh
+          DEBLOATED_PACKAGES: https://raw.githubusercontent.com/pkgforge-dev/Anylinux-AppImages/9ec9767d6b32dbc95242ffe055ca0833b9964941/useful-tools/get-debloated-pkgs.sh
+          MAKE_AUR_PACKAGE: https://raw.githubusercontent.com/pkgforge-dev/Anylinux-AppImages/9ec9767d6b32dbc95242ffe055ca0833b9964941/useful-tools/make-aur-package.sh
+
+      - name: Install AppImage dependencies
+        run: /bin/sh ./.github/build/appimage/get-dependencies.sh
+
+      - name: Extract Linux package
+        run: /bin/sh ./.github/build/appimage/extract-artifact.sh
+        env:
+          BUILD_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+
+      - name: Install pinned AppImage tools
+        run: |
+          wget -O /tmp/appimagetool https://github.com/pkgforge-dev/appimagetool/releases/download/0.3.3/appimagetool-x86_64-linux
+          echo "0d01a4e2628efc897be9663f0faeed6a171e1851270b4e1ce4c22434a36ecebd  /tmp/appimagetool" | sha256sum -c -
+          chmod +x /tmp/appimagetool
+          wget -O /tmp/sharun https://github.com/pkgforge-dev/Anylinux-sharun/releases/download/2.2.5/sharun-x86_64
+          echo "8714860e67c47f57d16248260cc6c333a7baa5741bc6d0f6645ab4cbab4b314a  /tmp/sharun" | sha256sum -c -
+          chmod +x /tmp/sharun
+          wget -O /tmp/mkdwarfs https://github.com/mhx/dwarfs/releases/download/v0.15.6/dwarfs-universal-0.15.6-Linux-x86_64
+          echo "50891c38ba359db8271819a6cbf6aaa8068681523f0c4f2b8242007a45edaa28  /tmp/mkdwarfs" | sha256sum -c -
+          chmod +x /tmp/mkdwarfs
+          wget -O /tmp/uruntime https://github.com/VHSgunzo/uruntime/releases/download/v0.5.9/uruntime-appimage-dwarfs-lite-x86_64
+          echo "cef962c299f2fa19b2b3cdf2fa1565ee8541796cc89b9a97a591f94041e8b083  /tmp/uruntime" | sha256sum -c -
+          chmod +x /tmp/uruntime
+
+      - name: Build and test AppImage
+        run: /bin/sh ./.github/build/appimage/make-appimage.sh
+        env:
+          ANYLINUX_LIB_SOURCE: https://raw.githubusercontent.com/pkgforge-dev/Anylinux-AppImages/9ec9767d6b32dbc95242ffe055ca0833b9964941/useful-tools/lib/anylinux.c
+          APPIMAGETOOL: /tmp/appimagetool
+          DWARFS_CMD: /tmp/mkdwarfs
+          GTK_CLASS_FIX_SOURCE: https://raw.githubusercontent.com/pkgforge-dev/Anylinux-AppImages/9ec9767d6b32dbc95242ffe055ca0833b9964941/useful-tools/lib/gtk-class-fix.c
+          HOOKSRC: https://raw.githubusercontent.com/pkgforge-dev/Anylinux-AppImages/9ec9767d6b32dbc95242ffe055ca0833b9964941/useful-tools/hooks
+          RUNTIME: /tmp/uruntime
+          SHARUN_PATH: /tmp/sharun
+
+      - name: Validate AppImage artifacts
+        run: |
+          set -eu
+          set -- dist/*.AppImage
+          [ "$#" -eq 1 ] && [ -f "$1" ] || { echo "Expected exactly one AppImage" >&2; exit 1; }
+          set -- dist/*.AppImage.zsync
+          [ "$#" -eq 1 ] && [ -f "$1" ] || { echo "Expected exactly one AppImage zsync file" >&2; exit 1; }
+
+      - name: Upload AppImage artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: stoat-desktop-appimage
+          path: dist/*.AppImage*
+          if-no-files-found: error
+          retention-days: 30
+
   build-windows:
+    needs: validate-release
     runs-on: windows-2022
     env:
       npm_config_msvs_version: "2022"
@@ -338,7 +432,7 @@ jobs:
           retention-days: 30
 
   create-release:
-    needs: [build-linux, build-windows]
+    needs: [build-linux, build-appimage, build-windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.event.inputs.version, 'v')
 
@@ -360,13 +454,24 @@ jobs:
           name: stoat-desktop-windows
           path: artifacts
 
+      - name: Download AppImage artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: stoat-desktop-appimage
+          path: artifacts
+
       - name: List artifacts
         run: ls -la artifacts
 
       - name: Generate changelog
         id: changelog
         run: |
-          PREVIOUS_TAG=$(git describe --tags --abbrev=0 $(git rev-list --tags --skip=1 --max-count=1) 2>/dev/null || echo "")
+          RELEASE_TAG="${{ github.event.inputs.version || github.ref_name }}"
+          if git rev-parse --verify --quiet "refs/tags/$RELEASE_TAG" >/dev/null; then
+            PREVIOUS_TAG=$(git describe --tags --abbrev=0 "$RELEASE_TAG^" 2>/dev/null || echo "")
+          else
+            PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD 2>/dev/null || echo "")
+          fi
 
           if [ -z "$PREVIOUS_TAG" ]; then
             CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges)
@@ -378,6 +483,7 @@ jobs:
           ## Downloads
           - **Windows**: Extract the entire Windows ZIP into a new empty folder and run `stoat-desktop.exe`.
           - **Linux**: Extract the entire Linux ZIP into a new empty folder and run `./stoat-desktop`.
+          - **Linux AppImage**: Make the AppImage executable and run it directly. The `.zsync` file supports compatible AppImage update tools.
 
           Do not copy only the executable over an older install. The bundled client is stored in `resources/web-dist` and must remain beside the application files.
 
@@ -394,8 +500,9 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
-          files: artifacts/*.zip
+          files: artifacts/*
           tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          target_commitish: ${{ github.sha }}
           name: Stoat Desktop ${{ github.event.inputs.version || github.ref_name }}
           body_path: ${{ steps.changelog.outputs.changelog_file }}
           draft: false

@@ -11,6 +11,7 @@ import {
   registerPushToTalkHotkey,
 } from "./native/pushToTalk";
 import { initTray } from "./native/tray";
+import { cleanupVirtualMic, initVirtualMic } from "./native/virtualMic";
 import {
   BUILD_URL,
   createMainWindow,
@@ -63,6 +64,7 @@ if (acquiredLock) {
     initTray();
     initDiscordRpc();
     initPushToTalk();
+    initVirtualMic();
 
     // Windows specific fix for notifications
     if (process.platform === "win32") {
@@ -83,6 +85,7 @@ if (acquiredLock) {
   app.on("window-all-closed", () => {
     cleanupPushToTalk();
     if (process.platform !== "darwin") {
+      cleanupVirtualMic();
       // Only way I found was to SIGKILL the process since process.exit() and app.exit() didn't work
       process.kill(process.pid, "SIGKILL");
     }
@@ -91,6 +94,7 @@ if (acquiredLock) {
   // Clean up PTT on quit
   app.on("before-quit", () => {
     cleanupPushToTalk();
+    cleanupVirtualMic();
   });
 
   app.on("activate", () => {

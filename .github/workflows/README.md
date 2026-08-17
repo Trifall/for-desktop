@@ -1,6 +1,6 @@
 # GitHub Actions - Desktop Build Workflow
 
-This GitHub Actions workflow automatically builds the Stoat Desktop application for Linux and Windows and creates releases.
+This GitHub Actions workflow builds Stoat Desktop for Linux and Windows, creates a Linux AppImage, and publishes releases.
 
 **Location**: `stoat-for-desktop/.github/workflows/build-desktop.yml`
 
@@ -14,51 +14,60 @@ Since the desktop app (`stoat-for-desktop`) and web client (`client`) are in sep
 4. Embeds the selected desktop release tag in the web client
 5. Copies the built assets to `web-dist/` in the desktop repo
 6. Builds the Electron app
-7. Creates distributable ZIP files
+7. Creates distributable ZIP files and a Linux AppImage with zsync metadata
 
 ## Triggering Builds
 
 ### Automatic (Recommended)
+
 Push a tag starting with `v`:
+
 ```bash
 git tag v1.2.0
 git push origin v1.2.0
 ```
 
 The workflow will automatically:
+
 1. Build for Linux and Windows
 2. Create a GitHub Release
-3. Attach the ZIP files to the release
+3. Attach the ZIP, AppImage, and zsync files to the release
 
 ### Manual
+
 Go to **Actions** → **Build Desktop Release** → **Run workflow**
 Enter a version tag (e.g., `v1.2.0`) and run.
 
 ## What Gets Built
 
 The workflow replicates `build-standalone.sh`:
+
 1. Installs dependencies with mise (in client/)
 2. Builds the web client
 3. Copies audio assets
 4. Processes translations
 5. Builds the Electron app
-6. Creates distributable ZIP files
+6. Creates distributable ZIP files and a Linux AppImage
 
 ## Platform Support
 
 ### Linux
+
 - **Target**: `linux-x64`
 - **Output**: `Stoat-Desktop-linux-x64-*.zip`
+- **AppImage**: `*.AppImage` with matching `.zsync` metadata
 - **Requirements**: X11 or XWayland, libx11, libxtst, libxt, libxinerama
 - **Runner**: `ubuntu-latest`
 
 ### Windows
+
 - **Target**: `win32-x64`
 - **Output**: `Stoat-Desktop-win32-x64-*.zip`
 - **Runner**: `windows-2022`
 - **Toolchain**: Visual Studio 2022 C++ environment, selected explicitly for `node-gyp`
 
 ### macOS (Not Implemented)
+
 Currently not supported due to iohook keyboard issues on macOS.
 
 ## Workflow Details
@@ -80,24 +89,50 @@ Currently not supported due to iohook keyboard issues on macOS.
 
 ### Jobs
 
+#### `validate-release`
+
+Rejects a run when the requested tag already points to a different commit, preventing a manual dispatch from replacing release assets with binaries built from another ref.
+
 #### `build-linux`
+
 Runs on Ubuntu and builds the Linux version:
+
 - Uses mise for task management
 - Builds with Electron Forge
 - Creates ZIP via `@electron-forge/maker-zip`
-- Uploads artifact
-- Creates release if triggered by tag
+- Uploads the completed Linux ZIP for the AppImage and release jobs
 
 #### `build-windows`
+
 Runs on Windows and builds the Windows version:
+
 - Configures the Visual Studio 2022 C++ environment before installing native dependencies
 - Compiles the keyspy Windows server with MinGW during packaging
 - Same build process as Linux
 - Creates Windows ZIP
 
+#### `build-appimage`
+
+Runs after `build-linux` and converts that already-complete ZIP into an x64 AppImage:
+
+- Reuses the bundled paired web client and packaged native modules instead of rebuilding
+- Uses a digest-pinned pkgforge Arch Linux container, commit-pinned packaging sources, and checksum-verified appimagetool, Sharun, mkdwarfs, and uruntime binaries
+- Embeds updater metadata for `Trifall/stoat-for-desktop`
+- Uploads the AppImage and matching zsync file for the release job
+
+#### `create-release`
+
+Runs after all platform artifacts are complete:
+
+- Downloads the Linux ZIP, Windows ZIP, AppImage, and zsync artifacts
+- Generates the changelog from the previous reachable tag
+- Creates the requested tag at the workflow's packaged commit when needed
+- Publishes one GitHub Release containing every artifact
+
 ### Caching
 
 The workflow caches:
+
 - pnpm store (dependencies)
 - mise tools
 
@@ -105,24 +140,29 @@ This speeds up subsequent builds significantly.
 
 ### Artifacts
 
-Each build produces artifacts that are:
+The build produces ZIP, AppImage, and zsync artifacts that are:
+
 1. Uploaded as workflow artifacts (30-day retention)
 2. Attached to GitHub Releases (permanent)
 
 ## Configuration
 
 ### Required Secrets
+
 - `GITHUB_TOKEN` - Automatically provided by GitHub Actions
 
 ### Required Files
+
 Make sure these files exist:
 
 **In stoat-for-desktop repo:**
+
 - `package.json` - Desktop dependencies
 - `forge.config.ts` - Electron Forge config
 - `.github/workflows/build-desktop.yml` - This workflow
 
 **In stoat-for-web repo (checked out to client/):**
+
 - `.mise/config.toml` - Mise configuration
 - `.mise/tasks/*` - Build tasks
 
@@ -134,7 +174,7 @@ The workflow uses the web client at `Trifall/stoat-for-web`. If you fork the cli
 - name: Checkout client repo
   uses: actions/checkout@v7
   with:
-    repository: YOUR_USERNAME/YOUR_FORK  # Change this if you forked
+    repository: YOUR_USERNAME/YOUR_FORK # Change this if you forked
     path: client
     fetch-depth: 0
 ```
@@ -142,9 +182,11 @@ The workflow uses the web client at `Trifall/stoat-for-web`. If you fork the cli
 ## Troubleshooting
 
 ### Build Fails: "mise not found"
+
 The `jdx/mise-action` should install mise automatically. If it fails, check that your mise config is valid in `client/.mise/config.toml`.
 
 ### Windows Build Fails: "node is not recognized" inside a mise task
+
 The client mise config installs its own Node and pnpm versions. Keep `jdx/mise-action` on v4 or newer so the action installs the Windows shim alongside mise. The workflow prints the resolved `node`, Node version, pnpm version, and mise version before building dependencies.
 
 Mise 2026.7.7 on Windows can resolve Node correctly in PowerShell but lose it inside the nested process used by `mise build:deps`, causing pnpm package scripts such as `tsc`, `tsup`, and `unbuild` to report that Node is unavailable. The Windows job therefore runs the same underlying pnpm commands directly for dependency builds, translations, asset setup, and the Vite build. Keep those commands synchronized with the corresponding tasks under `client/.mise/tasks/`. Linux continues using mise tasks directly.
@@ -152,9 +194,11 @@ Mise 2026.7.7 on Windows can resolve Node correctly in PowerShell but lose it in
 Do not rebuild `$env:Path` from only the machine and user environment variables. GitHub Actions adds setup-node, pnpm, and mise paths through `GITHUB_PATH`; replacing PATH that way discards those job-specific entries and does not fix the nested-task boundary.
 
 ### Build Fails: "pnpm not found"
+
 The `pnpm/action-setup` installs pnpm. Make sure your `packageManager` field in `package.json` is set correctly.
 
 ### ZIP Not Found
+
 The workflow packages once, then runs the configured Forge target by its maker name with `--targets=zip --skip-package`. Do not delete `out/Stoat-<platform>-x64` between the package and make steps because it is the input to `--skip-package`.
 
 Forge 7.11 can print an empty `Making for the following targets:` progress line even when the ZIP target resolved. The later `Making a zip distributable` line is the useful confirmation.
@@ -162,16 +206,24 @@ Forge 7.11 can print an empty `Making for the following targets:` progress line 
 If `package` stops at `Finalizing package` without an error or output directory, verify the desktop phase is using Node 22. Electron Forge 7.11 and its `@electron/packager` 18.4.4 dependency can silently exit there on Node 24 ([electron/forge#4282](https://github.com/electron/forge/issues/4282)). The workflow intentionally switches from Node 24 to Node 22 after building the web client.
 
 Check the `forge.config.ts` to ensure `new MakerZIP({})` is configured and the output path matches what the workflow expects:
+
 - Linux: `out/make/zip/linux/x64/*.zip`
 - Windows: `out/make/zip/win32/x64/*.zip`
 
+### AppImage Build Fails
+
+The AppImage job expects exactly one `Stoat-Desktop-linux-x64-*.zip` from the `stoat-desktop-linux` artifact. Keep the Linux ZIP renaming step, AppImage extraction script, and artifact download synchronized. Inspect the resulting AppImage for `resources/web-dist`, unpacked keyspy, and unpacked `node-pipewire`; a successful wrapper command does not prove those runtime files survived conversion.
+
 ### Windows Build Fails: Visual Studio Not Found
+
 The `register-scheme` dependency invokes `node-gyp` during installation. Keep the Windows job on `windows-2022`, configure `ilammy/msvc-dev-cmd` before either dependency install, and keep `npm_config_msvs_version` set to `2022`. This ensures `node-gyp` can find the hosted runner's Visual Studio C++ workload.
 
 ### Audio Assets Missing
+
 Ensure `client/packages/client/scripts/assets_fallback/audio/` exists with all 7 .wav files in the stoat-for-web repo.
 
 ### Camera and Screen Share Show "Coming soon!"
+
 Video support is compiled into the web bundle through `VITE_CFG_ENABLE_VIDEO`. Local builds may receive it from an ignored `packages/client/.env`, but CI checkouts do not include that file. Both workflow web-build steps must explicitly set `VITE_CFG_ENABLE_VIDEO: "true"`; otherwise the release bundle permanently renders camera and screen sharing as unavailable even though the Electron screen picker is implemented.
 
 ### Settings Shows the Upstream Web Version
@@ -179,26 +231,30 @@ Video support is compiled into the web bundle through `VITE_CFG_ENABLE_VIDEO`. L
 The desktop release tag is compiled into the paired web client through `VITE_RELEASE_TAG`. Both platform build jobs must set it from `${{ github.event.inputs.version || github.ref_name }}`. Without that variable, the client intentionally falls back to the upstream root `package.json` version.
 
 ### Client Features Are Missing After an Update
+
 Extract the complete release ZIP into a new empty directory and launch the executable from that directory. Do not replace only the executable or reuse a shortcut until its target is verified. Packaged web assets live under `resources/web-dist`; if that directory is missing, the desktop app falls back to the remote web client.
 
 ### Client Repo Not Found
+
 Make sure the `repository` field in the checkout step matches your actual GitHub username/repo name for the web client.
 
 ## Customization
 
 ### Add macOS Support
+
 If macOS support is added in the future:
 
 ```yaml
-  build-macos:
-    runs-on: macos-latest
-    steps:
-      # Similar to Linux build
-      - name: Build desktop app
-        run: pnpm make --platform=darwin
+build-macos:
+  runs-on: macos-latest
+  steps:
+    # Similar to Linux build
+    - name: Build desktop app
+      run: pnpm make --platform=darwin
 ```
 
 ### Change Node.js Version
+
 The workflow deliberately uses separate Node versions for the web and desktop phases:
 
 - Node 24 builds the paired web client.
@@ -219,7 +275,9 @@ Keep the Electron Forge phase on Node 22 until the Node 24 finalization incompat
 ```
 
 ### Add More Makers
+
 To build other formats (deb, rpm, etc.), modify the maker command:
+
 ```yaml
 run: |
   pnpm make --platform=linux --targets=zip,deb
@@ -245,6 +303,7 @@ Note: `act` doesn't support Windows runners, so the Windows job must be tested o
 ## Related Files
 
 - `stoat-for-desktop/.github/workflows/build-desktop.yml` - This workflow
+- `stoat-for-desktop/.github/build/appimage/` - AppImage extraction and packaging scripts
 - `build-standalone.sh` - Local build script (same process)
 - `stoat-for-desktop/forge.config.ts` - Build configuration
 - `NotificationSounds.md` - Technical documentation

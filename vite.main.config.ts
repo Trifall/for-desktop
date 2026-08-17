@@ -7,8 +7,9 @@ export default defineConfig({
         "keyspy",
         "electron",
         "bufferutil",
-        "utf-8-validate"
-      ]
-    }
-  }
+        "utf-8-validate",
+        "node-pipewire",
+      ],
+    },
+  },
 });

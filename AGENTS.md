@@ -183,6 +183,30 @@ Relevant files include:
 - Do not remove the tray Reload item because normal remote/HMR development does not need it.
 - Do not conflate closing to tray with quitting the application.
 
+## Wayland Screen Audio
+
+### Do
+
+- Treat the main process as the sole owner of the PipeWire virtual-microphone lifecycle.
+- Call `initVirtualMic()` once after application startup and call `cleanupVirtualMic()` before terminating the process.
+- Keep `window.native.isWayland()` synchronous and Boolean. The paired web client deliberately ignores missing, asynchronous, or non-Boolean bridges.
+- Keep `stoat-virtual-sink` and `stoat-virtual-source` synchronized with the paired web client; the source is reserved for screen audio and hidden from ordinary microphone selection.
+- Preserve the approved always-on routing behavior: while Stoat runs on a Wayland session, route non-Stoat application output into the virtual source and exclude Stoat/Electron output to avoid feedback.
+- Re-check PipeWire links on every poll and require a unique node name before using node-pipewire's name-based linker; duplicate names can accidentally include Stoat audio and must be skipped.
+- Recreate missing virtual nodes and refresh their IDs after recoverable PipeWire graph resets.
+- Keep `node-pipewire` as the exact optional npm dependency, external to the Vite main bundle, auto-unpacked from asar, and copied into the staged Linux app before packaging.
+- Package only the `node-pipewire` runtime `dist`, `LICENSE`, and `package.json` files; copying its full package adds substantial unnecessary size.
+- Keep Linux CI's PipeWire development package available before installing desktop dependencies.
+- Preserve normal display capture when virtual-microphone initialization or acquisition fails.
+
+### Do Not
+
+- Do not restore the retired `node-pipewire` git submodule or root `mise build:deps` task.
+- Do not implement `isWayland()` with `ipcRenderer.invoke()`; that returns a Promise and leaves the paired web integration dormant.
+- Do not route the reserved source through PTT, microphone gain, RNNoise, noise gate, or normal input-device settings.
+- Do not remove the Stoat process/client exclusion; doing so feeds call audio back into screen-share audio.
+- Do not claim native Wayland PTT support. Virtual screen audio works independently from keyspy, which still requires X11/XWayland for global shortcuts.
+
 ## Configuration and Persistence
 
 ### Do
@@ -211,8 +235,9 @@ Relevant files include:
 
 ### Do
 
-- Keep `keyspy`, `electron`, `bufferutil`, and `utf-8-validate` external in `vite.main.config.ts`.
+- Keep `keyspy`, `electron`, `bufferutil`, `utf-8-validate`, and `node-pipewire` external in `vite.main.config.ts`.
 - Keep `keyspy` unpacked from asar.
+- Keep the auto-unpack-natives plugin enabled for `node-pipewire`'s native binding.
 - Keep `nodeLinker: hoisted`; native copy paths and keyspy packaging rely on the flat layout.
 - Add native dependencies to `allowBuilds` when their install scripts must run.
 - Preserve Forge `prePackage` compilation of `WinKeyServer.exe` and `X11KeyServer`.
@@ -220,6 +245,7 @@ Relevant files include:
 - Keep Linux X11/XInput development packages and Windows MinGW available in packaging environments.
 - Keep `electron-rebuild` available when native modules must target a new Electron ABI.
 - Preserve the `cross-zip@4.0.1` patch until the dependency is upgraded to a version that no longer uses unsupported recursive `rmdir` calls.
+- Preserve the exact release-age exceptions for `electron@43.4.0` and `node-pipewire@1.1.0` until both packages naturally satisfy the inherited cooldown policy.
 - Inspect packaged output for native servers and unpacked module files.
 - Regenerate `pnpm-lock.yaml` with `pnpm install --no-frozen-lockfile` after approved dependency conflict resolution, then verify with a frozen install.
 
@@ -263,6 +289,7 @@ Relevant files include:
 - Keep GitHub Actions on Node 24-capable major versions or newer.
 - Keep the release workflow's Electron Forge phase on Node 22 until the upstream Node 24 finalization bug in Forge 7.11 / `@electron/packager` 18.4.4 is resolved; Node 24 remains the paired web build runtime.
 - Preserve action-runtime versions, artifact names, ZIP naming, changelog generation, and the two-platform release flow together.
+- Preserve the x64 Linux AppImage and zsync job as a wrapper around the already-complete Linux ZIP; it must not rebuild a client-less desktop package.
 - Keep desktop and paired-web lockfiles frozen in CI after intentional regeneration.
 - Update `.github/workflows/README.md` when workflow inputs, artifacts, prerequisites, or release behavior change.
 
@@ -271,7 +298,7 @@ Relevant files include:
 - Do not reconstruct Windows PATH from machine/user environment variables; that can discard paths added through `GITHUB_PATH`.
 - Do not remove the video feature environment variable because a local ignored `.env` makes development work.
 - Do not blindly restore deleted upstream release-please, webhook, git-town, build, or PR-title workflows.
-- Do not change ZIP names without updating discovery, upload, release, and documentation steps.
+- Do not change ZIP or AppImage names without updating discovery, upload, release, updater metadata, and documentation steps.
 - Do not assume Linux-only CI edits are sufficient for paired client or native dependency changes.
 
 ## Forked Assets and Generated Output
@@ -372,6 +399,7 @@ Test the relevant subset after desktop lifecycle, PTT, capture, config, or packa
 - Test `--force-server` and remote fallback separately from local `web-dist` loading.
 - Share a screen/window with and without audio; verify local audio remains available with `loopback`.
 - Inspect the packaged app for `web-dist`, unpacked keyspy, `@expo/sudo-prompt`, and the expected platform key server.
+- Inspect Linux packages and the AppImage for the unpacked `node-pipewire` native binding and its runtime package files.
 - Verify tray Show/Hide text, Reload, close-to-tray, real Quit, and saved window state.
 
 ## Feature Completion
