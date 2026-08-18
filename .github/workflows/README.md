@@ -117,6 +117,7 @@ Runs after `build-linux` and converts that already-complete ZIP into an x64 AppI
 
 - Reuses the bundled paired web client and packaged native modules instead of rebuilding
 - Uses a digest-pinned pkgforge Arch Linux container, commit-pinned packaging sources, and checksum-verified appimagetool, Sharun, mkdwarfs, and uruntime binaries
+- Installs the GTK, AT-SPI, CUPS, Cairo, Pango, X11, and xkbcommon runtime providers that Sharun scans and bundles for Electron
 - Embeds updater metadata for `Trifall/stoat-for-desktop`
 - Uploads the AppImage and matching zsync file for the release job
 
@@ -212,7 +213,7 @@ Check the `forge.config.ts` to ensure `new MakerZIP({})` is configured and the o
 
 ### AppImage Build Fails
 
-The AppImage job expects exactly one `Stoat-Desktop-linux-x64-*.zip` from the `stoat-desktop-linux` artifact. Keep the Linux ZIP renaming step, AppImage extraction script, and artifact download synchronized. Inspect the resulting AppImage for `resources/web-dist`, unpacked keyspy, and unpacked `node-pipewire`; a successful wrapper command does not prove those runtime files survived conversion.
+The AppImage job expects exactly one `Stoat-Desktop-linux-x64-*.zip` from the `stoat-desktop-linux` artifact. Keep the Linux ZIP renaming step, AppImage extraction script, and artifact download synchronized. If Sharun reports `not found` libraries while scanning `stoat-desktop`, add their Arch runtime providers to `.github/build/appimage/get-dependencies.sh`; the libraries must exist in the build container before Sharun can bundle them. Inspect the resulting AppImage for `resources/web-dist`, unpacked keyspy, and unpacked `node-pipewire`; a successful wrapper command does not prove those runtime files survived conversion.
 
 ### Windows Build Fails: Visual Studio Not Found
 
