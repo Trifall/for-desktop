@@ -10,7 +10,6 @@
     "baseUrl": ".",
     "outDir": "dist",
     "moduleResolution": "node",
-    "resolveJsonModule": true,
-    "types": ["electron-vite/node"]
+    "resolveJsonModule": true
   }
 }

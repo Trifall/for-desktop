@@ -375,7 +375,7 @@ Relevant files include:
 ### Known Baseline Conditions
 
 - `src/native/badges.ts` is currently not imported by `main.ts`; missing badge IPC behavior is pre-existing and should be fixed as a separate task.
-- `tsconfig.json` references the transitively hoisted `electron-vite/node` type and has an unused `dist` outDir; do not rewrite build configuration during unrelated work.
+- `tsconfig.json` has an unused `dist` outDir; do not rewrite build configuration during unrelated work.
 - TypeScript 4.5.4 reports parser errors in newer `node_modules` declarations; new errors under `src/` are still regressions.
 - Repository-wide ESLint currently has documented pre-existing errors and warnings; compare counts and paths instead of treating any non-zero exit as newly introduced.
 - Circular imports among config, PTT, Discord RPC, window, and tray modules currently rely on CommonJS lazy resolution.

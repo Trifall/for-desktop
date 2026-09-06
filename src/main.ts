@@ -3,6 +3,7 @@ import { IUpdateInfo, updateElectronApp } from "update-electron-app";
 import { BrowserWindow, Notification, app, shell } from "electron";
 import started from "electron-squirrel-startup";
 
+import { initAutoLaunch } from "./native/autoLaunch";
 import { config } from "./native/config";
 import { initDiscordRpc } from "./native/discordRpc";
 import {
@@ -65,6 +66,7 @@ if (acquiredLock) {
     initDiscordRpc();
     initPushToTalk();
     initVirtualMic();
+    initAutoLaunch();
 
     // Windows specific fix for notifications
     if (process.platform === "win32") {

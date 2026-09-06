@@ -632,7 +632,6 @@ Review every skipped commit. Git may skip a local patch when upstream independen
 Things that look like bugs but are actually load-bearing:
 
 - **`src/native/badges.ts` is never imported by `main.ts`.** The `ipcMain.on("setBadgeCount", ...)` listener it registers never fires; `window.native.setBadgeCount()` calls from the renderer are dropped silently. This is a **pre-existing fork condition**, _not_ a merge regression. Fixing it is a separate task — but do not be alarmed during merges if a "missing setBadgeCount handler" appears in logs.
-- **`tsconfig.json` has `types: ["electron-vite/node"]` but `electron-vite` isn't a direct dep** — works because the package is hoisted transitively. Pre-existing, presumably stale, harmless. Leave alone.
 - **`tsconfig.json#outDir: "dist"` is unused** — the real build output is `.vite/build/` per `package.json#main`. Pre-existing.
 - **TypeScript 4.5.4 produces parser errors under `node_modules/type-fest` and `node_modules/@types/node`** — pre-existing dependency declarations use syntax this compiler cannot parse. These errors come from `node_modules`; there should still be no errors in `src/`. Don't edit `node_modules` to suppress them — pin compatible dependency types or handle a TypeScript upgrade as a separate migration.
 - **Three pre-existing ESLint errors / one warning after upstream 1.5.1** — the errors are CommonJS `require()` calls in `src/native/window.ts`; the warning is the unused `version` import in `src/native/tray.ts`. The merge must not introduce additional problems, but it is fine for `pnpm lint` to exit non-zero. Compare counts and paths against this baseline rather than treating a non-zero exit alone as a regression.
@@ -643,6 +642,7 @@ Things that look like bugs but are actually load-bearing:
 - **PTT keybind parser duplication** — `parseAccelerators()` exists in both `src/native/pushToTalk.ts` and `src/world/pushToTalk.ts`. They must parse identically. If you change one, change the other.
 - **Preload's `setManualState` updates `currentPttState` itself** before telling the main process — this means UI toggles feel instant but the canonical state still lives in the main process; if the two get out of sync the user will see a flicker. Don't "fix" by removing the optimistic update.
 - **Circular imports** between `config.ts ↔ discordRpc.ts`, `config.ts ↔ pushToTalk.ts`, `window.ts ↔ tray.ts` — work fine under CommonJS because the exports are functions/objects resolved lazily. Don't refactor to ESM without testing.
+- **Auto-launch IPC registration is explicit** — `src/main.ts` calls `initAutoLaunch()` once after Electron is ready. Do not restore import-time `ipcMain.handle()` registration.
 
 ---
 
@@ -679,4 +679,4 @@ Test native Wayland screen/window sharing with and without audio, multiple appli
 
 ---
 
-_Last updated: after integrating upstream 1.5.1 with corrected Wayland virtual-microphone packaging and the fork AppImage release path._
+_Last updated: after integrating upstream 1.5.3 while preserving the fork release and AppImage pipeline._
